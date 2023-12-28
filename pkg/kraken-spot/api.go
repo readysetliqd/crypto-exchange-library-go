@@ -47,11 +47,12 @@ func callPublicApi(endpoint string, target interface{}) error {
 			return fmt.Errorf("error unmarshaling msg to json | %v", err)
 		}
 		if len(resp.Error) != 0 {
-			return fmt.Errorf("api error | %v", resp.Error)
-		} else {
-			return nil
+			return fmt.Errorf("api error(s) | %v", resp.Error)
+		} else if resp.Result == nil {
+			return fmt.Errorf("api error | no \"result\" field")
 		}
 	} else {
 		return fmt.Errorf("http status code not OK status code | %v", res.StatusCode)
 	}
+	return nil
 }
