@@ -46,6 +46,9 @@ func callPublicApi(endpoint string, target interface{}) error {
 		if err != nil {
 			return fmt.Errorf("error unmarshaling msg to json | %v", err)
 		}
+		if resp.Result == nil {
+			return fmt.Errorf("api error | no \"result\" field")
+		}
 		if len(resp.Error) != 0 {
 			return fmt.Errorf("api error(s) | %v", resp.Error)
 		} else if resp.Result == nil {
