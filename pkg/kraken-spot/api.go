@@ -47,6 +47,9 @@ func SystemIsOnline() (bool, string) {
 	return false, systemStatus.Status
 }
 
+// Calls Kraken API public market data "Assets" endpoint. Gets information about
+// all assets that are available for deposit, withdrawal, trading and staking.
+// Returns them as *map[string]data.AssetInfo where the string is the asset name.
 func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 	allAssetInfo := &map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
@@ -56,6 +59,8 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 	return allAssetInfo, nil
 }
 
+// Calls Kraken API public market data "Assets" endpoint. Returns a slice of
+// strings of all tradeable asset names
 func GetAllAssets() ([]string, error) {
 	allAssetInfo := &map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
@@ -67,6 +72,18 @@ func GetAllAssets() ([]string, error) {
 		allAssets = append(allAssets, asset)
 	}
 	return allAssets, nil
+}
+
+// Calls Kraken API public market data "Assets" endpoint. Gets information about
+// specific asset passed to arg.
+func GetAssetInfo(asset string) (*data.AssetInfo, error) {
+	assetInfo := &data.AssetInfo{}
+	endpoint := "Assets" + "?asset=" + asset
+	err := callPublicApi(endpoint, assetInfo)
+	if err != nil {
+		return nil, err
+	}
+	return assetInfo, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
