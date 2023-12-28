@@ -61,7 +61,7 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 
 // Calls Kraken API public market data "Assets" endpoint. Returns a slice of
 // strings of all tradeable asset names
-func GetAllAssets() ([]string, error) {
+func AllAssets() ([]string, error) {
 	allAssetInfo := &map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
@@ -76,14 +76,15 @@ func GetAllAssets() ([]string, error) {
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // specific asset passed to arg.
-func GetAssetInfo(asset string) (data.AssetInfo, error) {
+func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	assetInfo := &map[string]data.AssetInfo{}
 	endpoint := "Assets?asset=" + asset
 	err := callPublicApi(endpoint, assetInfo)
 	if err != nil {
-		return data.AssetInfo{}, err
+		return nil, err
 	}
-	return (*assetInfo)[asset], nil
+	info := (*assetInfo)[asset]
+	return &info, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
