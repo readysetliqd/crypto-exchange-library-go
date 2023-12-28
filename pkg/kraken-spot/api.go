@@ -2,69 +2,56 @@ package krakenspot
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
-	"log"
 	"net/http"
 
 	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
-func GetServerTime() {
-	url := data.PublicApiUrl + "Time"
-	res, err := http.Get(url)
+func GetServerTime() (*data.ServerTime, error) {
+	serverTime := &data.ServerTime{}
+	err := callPublicApi("Time", serverTime)
 	if err != nil {
-		log.Println("error getting response from url | ", err, url)
+		return nil, err
 	}
-	defer res.Body.Close()
-
-	if res.StatusCode == http.StatusOK {
-		resp := data.ApiResp{Result: &data.ServerTime{}}
-		msg, err := io.ReadAll(res.Body)
-		if err != nil {
-			log.Println("error calling io.readall | ", err)
-			return
-		}
-
-		err = json.Unmarshal(msg, &resp)
-		if err != nil {
-			log.Println("error unmarshaling msg to json | ", err)
-		}
-		if len(resp.Error) != 0 {
-			log.Println(resp.Error)
-		} else {
-			log.Println(resp.Result.(*data.ServerTime))
-		}
-	} else {
-		log.Println("http status code not OK status code | ", res.StatusCode)
-	}
+	return serverTime, nil
 }
 
-func GetSystemStatus() {
-	url := data.PublicApiUrl + "SystemStatus"
+func GetSystemStatus() (*data.SystemStatus, error) {
+	systemStatus := &data.SystemStatus{}
+	err := callPublicApi("SystemStatus", systemStatus)
+	if err != nil {
+		return nil, err
+	}
+	return systemStatus, nil
+}
+
+func callPublicApi(endpoint string, target interface{}) error {
+	url := data.PublicApiUrl + endpoint
 	res, err := http.Get(url)
 	if err != nil {
-		log.Println("error getting response from url | ", err, url)
+		return fmt.Errorf("error getting response from url %v | %v", url, err)
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		resp := data.ApiResp{Result: &data.SystemStatus{}}
+		resp := data.ApiResp{Result: target}
 		msg, err := io.ReadAll(res.Body)
 		if err != nil {
-			log.Println("error calling io.readall | ", err)
-			return
+			return fmt.Errorf("error calling io.readall | %v", err)
 		}
 
 		err = json.Unmarshal(msg, &resp)
 		if err != nil {
-			log.Println("error unmarshaling msg to json | ", err)
+			return fmt.Errorf("error unmarshaling msg to json | %v", err)
 		}
 		if len(resp.Error) != 0 {
-			log.Println(resp.Error)
+			return fmt.Errorf("api error | %v", resp.Error)
 		} else {
-			log.Println(resp.Result.(*data.SystemStatus))
+			return nil
 		}
 	} else {
-		log.Println("http status code not OK status code | ", res.StatusCode)
+		return fmt.Errorf("http status code not OK status code | %v", res.StatusCode)
 	}
 }
