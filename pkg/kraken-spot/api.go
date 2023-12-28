@@ -47,8 +47,8 @@ func SystemIsOnline() (bool, string) {
 	return false, systemStatus.Status
 }
 
-func GetAllAssetInfo() (map[string]data.AssetInfo, error) {
-	allAssetInfo := map[string]data.AssetInfo{}
+func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
+	allAssetInfo := &map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
 		return nil, err
