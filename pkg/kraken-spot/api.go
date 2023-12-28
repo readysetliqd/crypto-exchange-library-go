@@ -57,13 +57,13 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 }
 
 func GetAllAssets() ([]string, error) {
-	allAssetInfo := map[string]data.AssetInfo{}
+	allAssetInfo := &map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
 	allAssets := []string{}
-	for asset := range allAssetInfo {
+	for asset := range *allAssetInfo {
 		allAssets = append(allAssets, asset)
 	}
 	return allAssets, nil
