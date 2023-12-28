@@ -28,6 +28,11 @@ func GetServerTime() {
 		if err != nil {
 			log.Println("error unmarshaling msg to json | ", err)
 		}
+		if len(resp.Error) != 0 {
+			log.Println(resp.Error)
+		} else {
+			log.Println(resp.Result)
+		}
 	} else {
 		log.Println("http status code not OK status code | ", res.StatusCode)
 	}
