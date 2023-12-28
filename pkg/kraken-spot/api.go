@@ -1,11 +1,12 @@
 package krakenspot
 
 import (
-	"crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
+
+	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
 func GetServerTime() {
