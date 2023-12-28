@@ -18,7 +18,7 @@ func GetServerTime() {
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		resp := data.ApiResp{}
+		resp := data.ApiResp{Result: &data.ServerTime{}}
 		msg, err := io.ReadAll(res.Body)
 		if err != nil {
 			log.Println("error calling io.readall | ", err)
@@ -48,7 +48,7 @@ func GetSystemStatus() {
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		resp := data.ApiResp{}
+		resp := data.ApiResp{Result: &data.SystemStatus{}}
 		msg, err := io.ReadAll(res.Body)
 		if err != nil {
 			log.Println("error calling io.readall | ", err)
