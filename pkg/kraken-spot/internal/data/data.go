@@ -16,10 +16,6 @@ type SystemStatus struct {
 }
 
 type AssetInfo struct {
-	Assets []AssetInfoAsset
-}
-
-type AssetInfoAsset struct {
 	Aclass          string  `json:"aclass"`
 	Altname         string  `json:"altname"`
 	Decimals        uint8   `json:"decimals"`

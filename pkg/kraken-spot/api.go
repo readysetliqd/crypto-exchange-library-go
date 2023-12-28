@@ -47,13 +47,26 @@ func SystemIsOnline() (bool, string) {
 	return false, systemStatus.Status
 }
 
-func GetAllAssetInfo() (*map[string]data.AssetInfoAsset, error) {
-	allAssetInfo := &map[string]data.AssetInfoAsset{}
+func GetAllAssetInfo() (map[string]data.AssetInfo, error) {
+	allAssetInfo := map[string]data.AssetInfo{}
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
 	return allAssetInfo, nil
+}
+
+func GetAllAssets() ([]string, error) {
+	allAssetInfo := map[string]data.AssetInfo{}
+	err := callPublicApi("Assets", allAssetInfo)
+	if err != nil {
+		return nil, err
+	}
+	allAssets := []string{}
+	for asset := range allAssetInfo {
+		allAssets = append(allAssets, asset)
+	}
+	return allAssets, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
