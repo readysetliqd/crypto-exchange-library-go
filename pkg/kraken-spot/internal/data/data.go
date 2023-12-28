@@ -20,10 +20,10 @@ type AssetInfo struct {
 }
 
 type AssetInfoAsset struct {
-	Aclass          string
-	Altname         string
-	Decimals        uint8
-	DisplayDecimals uint8
-	CollateralValue float32
-	Status          string
+	Aclass          string  `json:"aclass"`
+	Altname         string  `json:"altname"`
+	Decimals        uint8   `json:"decimals"`
+	DisplayDecimals uint8   `json:"display_decimals"`
+	CollateralValue float32 `json:"collateral_value"`
+	Status          string  `json:"status"`
 }
