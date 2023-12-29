@@ -193,7 +193,7 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
-// of all tradeable pair names.
+// of all tradeable pair names. Sorted alphabetically.
 func ListTradeablePairs() ([]string, error) {
 	tradeablePairs := []string{}
 	pairInfo, err := GetTradeablePairsInfo()
@@ -203,6 +203,7 @@ func ListTradeablePairs() ([]string, error) {
 	for pair := range *pairInfo {
 		tradeablePairs = append(tradeablePairs, pair)
 	}
+	slices.Sort(tradeablePairs)
 	return tradeablePairs, nil
 }
 
@@ -221,18 +222,6 @@ func ListWebsocketNames() ([]string, error) {
 	return websocketNames, nil
 }
 
-func MapWebsocketNames() (map[string]bool, error) {
-	pairInfo, err := GetTradeablePairsInfo()
-	if err != nil {
-		return nil, err
-	}
-	websocketNames := make(map[string]bool, data.PairsMapSize)
-	for pair := range *pairInfo {
-		websocketNames[(*pairInfo)[pair].Wsname] = true
-	}
-	return websocketNames, nil
-}
-
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
 // of all tradeable pairs' altnames. Sorted alphabetically.
 func ListAltNames() ([]string, error) {
@@ -246,6 +235,20 @@ func ListAltNames() ([]string, error) {
 	}
 	slices.Sort(altNames)
 	return altNames, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint and returns map of
+// all tradeable websocket names for fast lookup.
+func MapWebsocketNames() (map[string]bool, error) {
+	pairInfo, err := GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	websocketNames := make(map[string]bool, data.PairsMapSize)
+	for pair := range *pairInfo {
+		websocketNames[(*pairInfo)[pair].Wsname] = true
+	}
+	return websocketNames, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
