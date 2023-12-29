@@ -69,24 +69,39 @@ type AssetPairLeverage struct {
 }
 
 type TickerInfo struct {
-	Ask             BookInfo `json:"a"`
-	Bid             BookInfo `json:"b"`
-	LastTradeClosed []string `json:"c"`
-	Volume          []string `json:"v"`
-	VWAP            []string `json:"p"`
-	NumberOfTrades  []uint   `json:"t"`
-	Low             []string `json:"l"`
-	High            []string `json:"h"`
-	Open            string   `json:"o"`
+	Ask             TickerBookInfo      `json:"a"`
+	Bid             TickerBookInfo      `json:"b"`
+	LastTradeClosed TickerLastTradeInfo `json:"c"`
+	Volume          TickerDailyInfo     `json:"v"`
+	VWAP            TickerDailyInfo     `json:"p"`
+	NumberOfTrades  TickerDailyInfoInt  `json:"t"`
+	Low             TickerDailyInfo     `json:"l"`
+	High            TickerDailyInfo     `json:"h"`
+	Open            string              `json:"o"`
 }
 
-type BookInfo struct {
+type TickerBookInfo struct {
 	Price          string
 	WholeLotVolume string
 	LotVolume      string
 }
 
-func (pi *BookInfo) UnmarshalJSON(data []byte) error {
+type TickerLastTradeInfo struct {
+	Price     string
+	LotVolume string
+}
+
+type TickerDailyInfo struct {
+	Today       string
+	Last24Hours string
+}
+
+type TickerDailyInfoInt struct {
+	Today       int
+	Last24Hours int
+}
+
+func (pi *TickerBookInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
@@ -95,6 +110,42 @@ func (pi *BookInfo) UnmarshalJSON(data []byte) error {
 		pi.Price = v[0]
 		pi.WholeLotVolume = v[1]
 		pi.LotVolume = v[2]
+	}
+	return nil
+}
+
+func (pi *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
+	var v []string
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 3 {
+		pi.Price = v[0]
+		pi.LotVolume = v[1]
+	}
+	return nil
+}
+
+func (pi *TickerDailyInfo) UnmarshalJSON(data []byte) error {
+	var v []string
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 3 {
+		pi.Today = v[0]
+		pi.Last24Hours = v[1]
+	}
+	return nil
+}
+
+func (pi *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
+	var v []int
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 3 {
+		pi.Today = v[0]
+		pi.Last24Hours = v[1]
 	}
 	return nil
 }
