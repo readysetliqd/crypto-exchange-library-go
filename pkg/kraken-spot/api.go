@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"slices"
 
 	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
@@ -51,24 +52,24 @@ func SystemIsOnline() (bool, string) {
 // all assets that are available for deposit, withdrawal, trading and staking.
 // Returns them as *map[string]data.AssetInfo where the string is the asset name.
 func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
-	allAssetInfo := &map[string]data.AssetInfo{}
+	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
-	return allAssetInfo, nil
+	return &allAssetInfo, nil
 }
 
 // Calls Kraken API public market data "Assets" endpoint. Returns a slice of
 // strings of all tradeable asset names
 func ListAssets() ([]string, error) {
-	allAssetInfo := &map[string]data.AssetInfo{}
+	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
 	err := callPublicApi("Assets", allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
 	allAssets := []string{}
-	for asset := range *allAssetInfo {
+	for asset := range allAssetInfo {
 		allAssets = append(allAssets, asset)
 	}
 	return allAssets, nil
@@ -77,13 +78,13 @@ func ListAssets() ([]string, error) {
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // specific asset passed to arg.
 func GetAssetInfo(asset string) (*data.AssetInfo, error) {
-	assetInfo := &map[string]data.AssetInfo{}
+	assetInfo := make(map[string]data.AssetInfo)
 	endpoint := "Assets?asset=" + asset
 	err := callPublicApi(endpoint, assetInfo)
 	if err != nil {
 		return nil, err
 	}
-	info := (*assetInfo)[asset]
+	info := assetInfo[asset]
 	return &info, nil
 }
 
@@ -93,20 +94,24 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
 func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, error) {
-	pairInfo := &map[string]data.AssetPairInfo{}
+	var initialCapacity int
 	endpoint := "AssetPairs"
 	if len(pair) > 0 {
+		initialCapacity = 1
 		if len(pair) > 1 {
 			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 			return nil, err
 		}
 		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = data.PairsMapSize
 	}
+	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
 	err := callPublicApi(endpoint, pairInfo)
 	if err != nil {
 		return nil, err
 	}
-	return pairInfo, nil
+	return &pairInfo, nil
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint with "margin" info
@@ -115,20 +120,24 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
 func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, error) {
-	pairInfo := &map[string]data.AssetPairMargin{}
+	var initialCapacity int
 	endpoint := "AssetPairs?info=margin"
 	if len(pair) > 0 {
+		initialCapacity = 1
 		if len(pair) > 1 {
 			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 			return nil, err
 		}
 		endpoint += "&pair=" + pair[0]
+	} else {
+		initialCapacity = data.PairsMapSize
 	}
+	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
 	err := callPublicApi(endpoint, pairInfo)
 	if err != nil {
 		return nil, err
 	}
-	return pairInfo, nil
+	return &pairInfo, nil
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint with "fees" info
@@ -137,20 +146,24 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
 func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, error) {
-	pairInfo := &map[string]data.AssetPairFees{}
+	var initialCapacity int
 	endpoint := "AssetPairs?info=fees"
 	if len(pair) > 0 {
+		initialCapacity = 1
 		if len(pair) > 1 {
 			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 			return nil, err
 		}
 		endpoint += "&pair=" + pair[0]
+	} else {
+		initialCapacity = data.PairsMapSize
 	}
+	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
 	err := callPublicApi(endpoint, pairInfo)
 	if err != nil {
 		return nil, err
 	}
-	return pairInfo, nil
+	return &pairInfo, nil
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint with "leverage" info
@@ -159,20 +172,24 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
 func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLeverage, error) {
-	pairInfo := &map[string]data.AssetPairLeverage{}
+	var initialCapacity int
 	endpoint := "AssetPairs?info=leverage"
 	if len(pair) > 0 {
+		initialCapacity = 1
 		if len(pair) > 1 {
 			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 			return nil, err
 		}
 		endpoint += "&pair=" + pair[0]
+	} else {
+		initialCapacity = data.PairsMapSize
 	}
+	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
 	err := callPublicApi(endpoint, pairInfo)
 	if err != nil {
 		return nil, err
 	}
-	return pairInfo, nil
+	return &pairInfo, nil
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
@@ -190,7 +207,7 @@ func ListTradeablePairs() ([]string, error) {
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
-// of all tradeable pairs' websocket names.
+// of all tradeable pairs' websocket names. Sorted alphabetically.
 func ListWebsocketNames() ([]string, error) {
 	pairInfo, err := GetTradeablePairsInfo()
 	if err != nil {
@@ -200,21 +217,35 @@ func ListWebsocketNames() ([]string, error) {
 	for pair := range *pairInfo {
 		websocketNames = append(websocketNames, (*pairInfo)[pair].Wsname)
 	}
+	slices.Sort(websocketNames)
+	return websocketNames, nil
+}
+
+func MapWebsocketNames() (map[string]bool, error) {
+	pairInfo, err := GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	websocketNames := make(map[string]bool, data.PairsMapSize)
+	for pair := range *pairInfo {
+		websocketNames[(*pairInfo)[pair].Wsname] = true
+	}
 	return websocketNames, nil
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
-// of all tradeable pairs' altnames.
+// of all tradeable pairs' altnames. Sorted alphabetically.
 func ListAltNames() ([]string, error) {
 	pairInfo, err := GetTradeablePairsInfo()
 	if err != nil {
 		return nil, err
 	}
-	websocketNames := []string{}
+	altNames := []string{}
 	for pair := range *pairInfo {
-		websocketNames = append(websocketNames, (*pairInfo)[pair].Altname)
+		altNames = append(altNames, (*pairInfo)[pair].Altname)
 	}
-	return websocketNames, nil
+	slices.Sort(altNames)
+	return altNames, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
