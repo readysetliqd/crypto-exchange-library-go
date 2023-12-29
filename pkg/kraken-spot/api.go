@@ -88,9 +88,31 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 }
 
 // Calls Kraken API public market data "AssetPairs" endpoint. Gets info for all
-// tradable asset pairs
-func GetAllTradeablePairs() (*map[string]data.AssetPair, error) {
+// tradable asset pairs. Accepts one optional argument for "info" query parameter.
+// Calling the function with no arguments calls the api with default info=info
+// parameter per the Kraken API docs.
+//
+// info enum: "info", "leverage", "fees", "margin"
+func GetAllTradeablePairs(info ...string) (*map[string]data.AssetPair, error) {
 	allPairInfo := &map[string]data.AssetPair{}
+	endpoint := "AssetPairs"
+	if len(info) > 0 {
+		if len(info) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		validOptions := map[string]bool{
+			"info":     true,
+			"leverage": true,
+			"margin":   true,
+			"fees":     true,
+		}
+		if _, ok := validOptions[info[0]]; !ok {
+			return nil, fmt.Errorf("invalid info query %v", info[0])
+		}
+		endpoint += "?info=" + info[0]
+	}
+
 	err := callPublicApi("AssetPairs", allPairInfo)
 	if err != nil {
 		return nil, err

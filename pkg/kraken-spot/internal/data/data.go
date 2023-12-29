@@ -31,8 +31,8 @@ type AssetPair struct {
 	Base               string      `json:"base"`
 	AclassQuote        string      `json:"aclass_quote"`
 	Quote              string      `json:"quote"`
-	PairDecimals       uint8       `json:"pair_decimals"`
 	CostDecimals       uint8       `json:"cost_decimals"`
+	PairDecimals       uint8       `json:"pair_decimals"`
 	LotDecimals        uint8       `json:"lot_decimals"`
 	LotMultiplier      uint8       `json:"lot_multiplier"`
 	LeverageBuy        []uint8     `json:"leverage_buy"`
