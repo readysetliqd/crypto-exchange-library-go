@@ -113,7 +113,7 @@ func GetAllTradeablePairs(info ...string) (*map[string]data.AssetPair, error) {
 		endpoint += "?info=" + info[0]
 	}
 
-	err := callPublicApi("AssetPairs", allPairInfo)
+	err := callPublicApi(endpoint, allPairInfo)
 	if err != nil {
 		return nil, err
 	}
