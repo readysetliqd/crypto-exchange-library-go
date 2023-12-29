@@ -119,7 +119,7 @@ func (pi *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if len(v) >= 3 {
+	if len(v) >= 2 {
 		pi.Price = v[0]
 		pi.LotVolume = v[1]
 	}
@@ -131,7 +131,7 @@ func (pi *TickerDailyInfo) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if len(v) >= 3 {
+	if len(v) >= 2 {
 		pi.Today = v[0]
 		pi.Last24Hours = v[1]
 	}
@@ -143,7 +143,7 @@ func (pi *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if len(v) >= 3 {
+	if len(v) >= 2 {
 		pi.Today = v[0]
 		pi.Last24Hours = v[1]
 	}
