@@ -24,7 +24,7 @@ type AssetInfo struct {
 	Status          string  `json:"status"`
 }
 
-type AssetPair struct {
+type AssetPairInfo struct {
 	Altname            string      `json:"altname"`
 	Wsname             string      `json:"wsname"`
 	AclassBase         string      `json:"aclass_base"`
@@ -48,4 +48,20 @@ type AssetPair struct {
 	Status             string      `json:"status"`
 	LongPositionLimit  uint32      `json:"long_position_limit"`
 	ShortPositionLimit uint32      `json:"short_position_limit"`
+}
+
+type AssetPairMargin struct {
+	MarginCall  uint8 `json:"margin_call"`
+	MarginLevel uint8 `json:"margin_level"`
+}
+
+type AssetPairFees struct {
+	Fees              [][]float64 `json:"fees"`
+	FeesMaker         [][]float64 `json:"fees_maker"`
+	FeeVolumeCurrency string      `json:"fee_volume_currency"`
+}
+
+type AssetPairLeverage struct {
+	LeverageBuy  []uint8 `json:"leverage_buy"`
+	LeverageSell []uint8 `json:"leverage_sell"`
 }

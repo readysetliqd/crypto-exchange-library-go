@@ -87,37 +87,76 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	return &info, nil
 }
 
-// Calls Kraken API public market data "AssetPairs" endpoint. Gets info for all
-// tradable asset pairs. Accepts one optional argument for "info" query parameter.
-// Calling the function with no arguments calls the api with default info=info
-// parameter per the Kraken API docs.
-//
-// info enum: "info", "leverage", "fees", "margin"
-func GetAllTradeablePairs(info ...string) (*map[string]data.AssetPair, error) {
-	allPairInfo := &map[string]data.AssetPair{}
+// Calls Kraken API public market data "AssetPairs" endpoint. Default gets info
+// for all tradable asset pairs. Accepts one optional argument for the "pair"
+// query parameter. If multiple pairs are desired, pass them as one comma
+// delimited string into the pair argument.
+func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, error) {
+	pairInfo := &map[string]data.AssetPairInfo{}
 	endpoint := "AssetPairs"
-	if len(info) > 0 {
-		if len(info) > 1 {
+	if len(pair) > 0 {
+		if len(pair) > 1 {
 			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 			return nil, err
 		}
-		validOptions := map[string]bool{
-			"info":     true,
-			"leverage": true,
-			"margin":   true,
-			"fees":     true,
-		}
-		if _, ok := validOptions[info[0]]; !ok {
-			return nil, fmt.Errorf("invalid info query %v", info[0])
-		}
-		endpoint += "?info=" + info[0]
+		endpoint += "?pair=" + pair[0]
 	}
-
-	err := callPublicApi(endpoint, allPairInfo)
+	err := callPublicApi(endpoint, pairInfo)
 	if err != nil {
 		return nil, err
 	}
-	return allPairInfo, nil
+	return pairInfo, nil
+}
+
+func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, error) {
+	pairInfo := &map[string]data.AssetPairMargin{}
+	endpoint := "AssetPairs?info=margin"
+	if len(pair) > 0 {
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "&pair=" + pair[0]
+	}
+	err := callPublicApi(endpoint, pairInfo)
+	if err != nil {
+		return nil, err
+	}
+	return pairInfo, nil
+}
+
+func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, error) {
+	pairInfo := &map[string]data.AssetPairFees{}
+	endpoint := "AssetPairs?info=fees"
+	if len(pair) > 0 {
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "&pair=" + pair[0]
+	}
+	err := callPublicApi(endpoint, pairInfo)
+	if err != nil {
+		return nil, err
+	}
+	return pairInfo, nil
+}
+
+func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLeverage, error) {
+	pairInfo := &map[string]data.AssetPairLeverage{}
+	endpoint := "AssetPairs?info=leverage"
+	if len(pair) > 0 {
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "&pair=" + pair[0]
+	}
+	err := callPublicApi(endpoint, pairInfo)
+	if err != nil {
+		return nil, err
+	}
+	return pairInfo, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
