@@ -149,3 +149,8 @@ func (pi *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+type TickerVolume struct {
+	Ticker string
+	Volume float64
+}

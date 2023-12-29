@@ -7,6 +7,8 @@ import (
 	"log"
 	"net/http"
 	"slices"
+	"sort"
+	"strconv"
 
 	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
@@ -255,6 +257,8 @@ func MapWebsocketNames() (map[string]bool, error) {
 // without arguments gets tickers for all tradable asset pairs. Accepts one
 // optional argument for the "pair" query parameter. If multiple pairs are
 // desired, pass them as one comma delimited string into the pair argument.
+//
+// Note: Today's prices start at midnight UTC
 func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
 	var initialCapacity int
 	endpoint := "Ticker"
@@ -274,6 +278,41 @@ func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
 		return nil, err
 	}
 	return &tickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Returns a slice of
+// tickers sorted descending by their last 24 hour USD volume
+// FIXME BTC and other currency denominated pairs are going to mess this up
+func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
+	if len(num) > 1 {
+		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+		return nil, err
+	}
+	topVolumeTickers := make([]data.TickerVolume, data.PairsMapSize)
+	tickers, err := GetTickerInfo()
+	if err != nil {
+		return nil, err
+	}
+	for ticker := range *tickers {
+		volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
+		if err != nil {
+			return nil, err
+		}
+		vwap, err := strconv.ParseFloat((*tickers)[ticker].VWAP.Last24Hours, 64)
+		if err != nil {
+			return nil, err
+		}
+		topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+	}
+	sort.Slice(topVolumeTickers, func(i, j int) bool {
+		return topVolumeTickers[i].Volume > topVolumeTickers[j].Volume
+	})
+	if len(num) > 0 {
+		if num[0] < uint16(len(topVolumeTickers)) {
+			topVolumeTickers = topVolumeTickers[:num[0]]
+		}
+	}
+	return topVolumeTickers, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
