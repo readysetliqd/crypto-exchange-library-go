@@ -8,3 +8,6 @@ const PairsMapSize = 745
 
 // As of 12/29/2023 there were 292 listed assets. 10% added for buffer
 const AssetsMapSize = 321
+
+// As of 12/29/2023 there were 739 listed tickers. 10% added for buffer
+const TickersMapSize = 813

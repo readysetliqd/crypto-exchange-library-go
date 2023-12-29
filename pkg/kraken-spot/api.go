@@ -288,7 +288,7 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 		return nil, err
 	}
-	topVolumeTickers := make([]data.TickerVolume, data.PairsMapSize)
+	topVolumeTickers := make([]data.TickerVolume, 0, data.TickersMapSize)
 	tickers, err := GetTickerInfo()
 	if err != nil {
 		return nil, err
