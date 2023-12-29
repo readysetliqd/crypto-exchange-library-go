@@ -159,6 +159,32 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 	return pairInfo, nil
 }
 
+func AllTradeablePairs() ([]string, error) {
+	pairInfo := &map[string]bool{}
+	tradeablePairs := []string{}
+	endpoint := "AssetPairs"
+	err := callPublicApi(endpoint, pairInfo)
+	if err != nil {
+		return nil, err
+	}
+	for pair := range *pairInfo {
+		tradeablePairs = append(tradeablePairs, pair)
+	}
+	return tradeablePairs, nil
+}
+
+func AllTradeablePairsWebsocketNames() ([]string, error) {
+	pairInfo, err := GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	websocketNames := []string{}
+	for pair := range *pairInfo {
+		websocketNames = append(websocketNames, (*pairInfo)[pair].Wsname)
+	}
+	return websocketNames, nil
+}
+
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
 // endpoint from the api docs. Args target interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
