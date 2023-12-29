@@ -69,15 +69,15 @@ type AssetPairLeverage struct {
 }
 
 type TickerInfo struct {
-	Ask             []BookInfo `json:"a"`
-	Bid             []BookInfo `json:"b"`
-	LastTradeClosed []string   `json:"c"`
-	Volume          []string   `json:"v"`
-	VWAP            []string   `json:"p"`
-	NumberOfTrades  []uint     `json:"t"`
-	Low             []string   `json:"l"`
-	High            []string   `json:"h"`
-	Open            string     `json:"o"`
+	Ask             BookInfo `json:"a"`
+	Bid             BookInfo `json:"b"`
+	LastTradeClosed []string `json:"c"`
+	Volume          []string `json:"v"`
+	VWAP            []string `json:"p"`
+	NumberOfTrades  []uint   `json:"t"`
+	Low             []string `json:"l"`
+	High            []string `json:"h"`
+	Open            string   `json:"o"`
 }
 
 type BookInfo struct {
