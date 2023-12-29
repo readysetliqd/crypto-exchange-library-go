@@ -281,7 +281,10 @@ func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
 }
 
 // Calls Kraken API public market data "Ticker" endpoint. Returns a slice of
-// tickers sorted descending by their last 24 hour USD volume
+// tickers sorted descending by their last 24 hour USD volume. Calling this
+// function without passing a value to arg num will return the entire list
+// of sorted pairs. Passing a value to num will return a slice of the top num
+// sorted pairs.
 // FIXME BTC and other currency denominated pairs are going to mess this up
 func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 	if len(num) > 1 {
