@@ -1,5 +1,7 @@
 package data
 
+import "encoding/json"
+
 type ApiResp struct {
 	Error  []string    `json:"error"`
 	Result interface{} `json:"result"`
@@ -67,13 +69,32 @@ type AssetPairLeverage struct {
 }
 
 type TickerInfo struct {
-	Ask             []string `json:"a"`
-	Bid             []string `json:"b"`
-	LastTradeClosed []string `json:"c"`
-	Volume          []string `json:"v"`
-	VWAP            []string `json:"p"`
-	NumberOfTrades  []uint   `json:"t"`
-	Low             []string `json:"l"`
-	High            []string `json:"h"`
-	Open            string   `json:"o"`
+	Ask             []BookInfo `json:"a"`
+	Bid             []BookInfo `json:"b"`
+	LastTradeClosed []string   `json:"c"`
+	Volume          []string   `json:"v"`
+	VWAP            []string   `json:"p"`
+	NumberOfTrades  []uint     `json:"t"`
+	Low             []string   `json:"l"`
+	High            []string   `json:"h"`
+	Open            string     `json:"o"`
+}
+
+type BookInfo struct {
+	Price          string
+	WholeLotVolume string
+	LotVolume      string
+}
+
+func (pi *BookInfo) UnmarshalJSON(data []byte) error {
+	var v []string
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 3 {
+		pi.Price = v[0]
+		pi.WholeLotVolume = v[1]
+		pi.LotVolume = v[2]
+	}
+	return nil
 }
