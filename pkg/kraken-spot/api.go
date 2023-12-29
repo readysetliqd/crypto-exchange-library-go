@@ -87,6 +87,17 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	return &info, nil
 }
 
+// Calls Kraken API public market data "AssetPairs" endpoint. Gets info for all
+// tradable asset pairs
+func GetAllTradeablePairs() (*map[string]data.AssetPair, error) {
+	allPairInfo := &map[string]data.AssetPair{}
+	err := callPublicApi("AssetPairs", allPairInfo)
+	if err != nil {
+		return nil, err
+	}
+	return allPairInfo, nil
+}
+
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
 // endpoint from the api docs. Args target interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
