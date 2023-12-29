@@ -65,3 +65,15 @@ type AssetPairLeverage struct {
 	LeverageBuy  []uint8 `json:"leverage_buy"`
 	LeverageSell []uint8 `json:"leverage_sell"`
 }
+
+type TickerInfo struct {
+	Ask             []string `json:"a"`
+	Bid             []string `json:"b"`
+	LastTradeClosed []string `json:"c"`
+	Volume          []string `json:"v"`
+	VWAP            []string `json:"p"`
+	NumberOfTrades  []uint   `json:"t"`
+	Low             []string `json:"l"`
+	High            []string `json:"h"`
+	Open            string   `json:"o"`
+}

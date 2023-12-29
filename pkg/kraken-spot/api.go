@@ -251,6 +251,31 @@ func MapWebsocketNames() (map[string]bool, error) {
 	return websocketNames, nil
 }
 
+// Calls Kraken API public market data "Ticker" endpoint. Calling function
+// without arguments gets tickers for all tradable asset pairs. Accepts one
+// optional argument for the "pair" query parameter. If multiple pairs are
+// desired, pass them as one comma delimited string into the pair argument.
+func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
+	var initialCapacity int
+	endpoint := "Ticker"
+	if len(pair) > 0 {
+		initialCapacity = 1
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = data.PairsMapSize
+	}
+	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	err := callPublicApi(endpoint, &tickers)
+	if err != nil {
+		return nil, err
+	}
+	return &tickers, nil
+}
+
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
 // endpoint from the api docs. Args target interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
