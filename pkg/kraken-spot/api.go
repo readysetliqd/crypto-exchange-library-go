@@ -53,7 +53,7 @@ func SystemIsOnline() (bool, string) {
 // Returns them as *map[string]data.AssetInfo where the string is the asset name.
 func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
-	err := callPublicApi("Assets", allAssetInfo)
+	err := callPublicApi("Assets", &allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 // strings of all tradeable asset names
 func ListAssets() ([]string, error) {
 	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
-	err := callPublicApi("Assets", allAssetInfo)
+	err := callPublicApi("Assets", &allAssetInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func ListAssets() ([]string, error) {
 func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	assetInfo := make(map[string]data.AssetInfo)
 	endpoint := "Assets?asset=" + asset
-	err := callPublicApi(endpoint, assetInfo)
+	err := callPublicApi(endpoint, &assetInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 		initialCapacity = data.PairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
-	err := callPublicApi(endpoint, pairInfo)
+	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +133,7 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 		initialCapacity = data.PairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
-	err := callPublicApi(endpoint, pairInfo)
+	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 		initialCapacity = data.PairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
-	err := callPublicApi(endpoint, pairInfo)
+	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 		initialCapacity = data.PairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
-	err := callPublicApi(endpoint, pairInfo)
+	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
 	}
