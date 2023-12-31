@@ -285,7 +285,6 @@ func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
 // function without passing a value to arg num will return the entire list
 // of sorted pairs. Passing a value to num will return a slice of the top num
 // sorted pairs.
-// FIXME BTC and other currency denominated pairs are going to mess this up
 func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 	if len(num) > 1 {
 		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
@@ -296,17 +295,66 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 	if err != nil {
 		return nil, err
 	}
-	for ticker := range *tickers {
-		volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
-		if err != nil {
-			return nil, err
-		}
-		vwap, err := strconv.ParseFloat((*tickers)[ticker].VWAP.Last24Hours, 64)
-		if err != nil {
-			return nil, err
-		}
-		topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+	allPairs, err := GetTradeablePairsInfo()
+	if err != nil {
+		log.Println(err)
 	}
+
+	for ticker := range *tickers {
+		if _, ok := (*allPairs)[ticker]; ok {
+			usdEquivalents := map[string]bool{
+				"DAI":   true,
+				"PYUSD": true,
+				"USDC":  true,
+				"USDT":  true,
+				"ZUSD":  true,
+			}
+			if usdEquivalents[(*allPairs)[ticker].Quote] {
+				volume, vwap, err := parseVolumeVwap(ticker, ticker, tickers)
+				if err != nil {
+					return nil, err
+				}
+				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				// Handle cases where USD is base currency
+			} else if (*allPairs)[ticker].Base == "ZUSD" {
+				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
+				if err != nil {
+					return nil, err
+				}
+				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: volume})
+			} else {
+				// Find matching pair with base and quote USD equivalent to normalize to USD volume
+				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
+					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"ZUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				} else if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"USD"]; ok {
+					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"USD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					// Handle edge cases specific to Kraken API base not matching data in tickers
+				} else if (*allPairs)[ticker].Base == "XXDG" {
+					volume, vwap, err := parseVolumeVwap(ticker, "XDGUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				} else if (*allPairs)[ticker].Base == "ZAUD" {
+					volume, vwap, err := parseVolumeVwap(ticker, "AUDUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				}
+			}
+		}
+	}
+
+	// Sort by descending volume and cut slice to num length
 	sort.Slice(topVolumeTickers, func(i, j int) bool {
 		return topVolumeTickers[i].Volume > topVolumeTickers[j].Volume
 	})
@@ -316,6 +364,19 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 		}
 	}
 	return topVolumeTickers, nil
+}
+
+// Parses volume and VWAP from tickers using ticker for volume and pair for VWAP
+func parseVolumeVwap(ticker string, pair string, tickers *map[string]data.TickerInfo) (float64, float64, error) {
+	volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	vwap, err := strconv.ParseFloat((*tickers)[pair].VWAP.Last24Hours, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	return volume, vwap, nil
 }
 
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
