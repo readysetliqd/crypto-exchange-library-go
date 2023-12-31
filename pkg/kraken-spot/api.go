@@ -384,14 +384,14 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 		numTrades := (*tickers)[ticker].NumberOfTrades.Last24Hours
 		topTradesTickers = append(topTradesTickers, data.TickerTrades{Ticker: ticker, NumTrades: numTrades})
 	}
+	sort.Slice(topTradesTickers, func(i, j int) bool {
+		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
+	})
 	if len(num) > 0 {
 		if num[0] < uint16(len(topTradesTickers)) {
 			topTradesTickers = topTradesTickers[:num[0]]
 		}
 	}
-	sort.Slice(topTradesTickers, func(i, j int) bool {
-		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
-	})
 	return topTradesTickers, nil
 }
 
