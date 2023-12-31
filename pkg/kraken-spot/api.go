@@ -353,7 +353,6 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 			}
 		}
 	}
-
 	// Sort by descending volume and cut slice to num length
 	sort.Slice(topVolumeTickers, func(i, j int) bool {
 		return topVolumeTickers[i].Volume > topVolumeTickers[j].Volume
@@ -364,6 +363,33 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 		}
 	}
 	return topVolumeTickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Returns a slice of
+// tickers sorted descending by their last 24 hour number of trades. Calling
+// this function without passing a value to arg num will return the entire list
+// of sorted pairs. Passing a value to num will return a slice of the top num
+// sorted pairs.
+func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) {
+	if len(num) > 1 {
+		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+		return nil, err
+	}
+	topTradesTickers := make([]data.TickerTrades, 0, data.TickersMapSize)
+	tickers, err := GetTickerInfo()
+	if err != nil {
+		return nil, err
+	}
+	for ticker := range *tickers {
+		numTrades := (*tickers)[ticker].NumberOfTrades.Last24Hours
+		topTradesTickers = append(topTradesTickers, data.TickerTrades{Ticker: ticker, NumTrades: numTrades})
+	}
+	if len(num) > 0 {
+		if num[0] < uint16(len(topTradesTickers)) {
+			topTradesTickers = topTradesTickers[:num[0]]
+		}
+	}
+	return topTradesTickers, nil
 }
 
 // Parses volume and VWAP from tickers using ticker for volume and pair for VWAP

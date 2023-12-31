@@ -154,3 +154,8 @@ type TickerVolume struct {
 	Ticker string
 	Volume float64
 }
+
+type TickerTrades struct {
+	Ticker    string
+	NumTrades int
+}
