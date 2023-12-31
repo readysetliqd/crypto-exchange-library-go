@@ -389,6 +389,9 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 			topTradesTickers = topTradesTickers[:num[0]]
 		}
 	}
+	sort.Slice(topTradesTickers, func(i, j int) bool {
+		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
+	})
 	return topTradesTickers, nil
 }
 
