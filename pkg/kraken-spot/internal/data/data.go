@@ -1,6 +1,9 @@
 package data
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type ApiResp struct {
 	Error  []string    `json:"error"`
@@ -160,36 +163,14 @@ type TickerTrades struct {
 	NumTrades int
 }
 
-func (r *OHLCResp) UnmarshalJSON(data []byte) error {
-	// Define a temporary structure to hold the raw JSON fields
-	type rawOHLCResp struct {
-		Data map[string]json.RawMessage `json:"result"`
-		Last uint64                     `json:"last"`
-	}
-
-	var raw rawOHLCResp
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-
-	r.Last = raw.Last
-	r.Data = make(map[string]OHLCDataSlice)
-
-	for k, v := range raw.Data {
-		var ohlcDataSlice OHLCDataSlice
-		if err := json.Unmarshal(v, &ohlcDataSlice); err != nil {
-			return err
-		}
-		r.Data[k] = ohlcDataSlice
-	}
-
-	return nil
-}
-
 type OHLCResp struct {
-	Data map[string]OHLCDataSlice
-	Last uint64 `json:"last"`
+	Ticker  string
+	Data    OHLCDataSlice
+	Current OHLCData
+	Last    uint64 `json:"last"`
 }
+
+type OHLCDataSlice []OHLCData
 
 type OHLCData struct {
 	Time   uint64
@@ -202,25 +183,41 @@ type OHLCData struct {
 	Count  uint32
 }
 
-type OHLCDataSlice []OHLCData
-
-func (pi *OHLCDataSlice) UnmarshalJSON(data []byte) error {
-	var v []interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
-		return err
-	}
-	for _, element := range v {
-		var ohlc OHLCData
-		el := element.([]interface{})
-		ohlc.Time = uint64(el[0].(float64))
-		ohlc.Open = el[1].(string)
-		ohlc.High = el[2].(string)
-		ohlc.Low = el[3].(string)
-		ohlc.Close = el[4].(string)
-		ohlc.VWAP = el[5].(string)
-		ohlc.Volume = el[6].(string)
-		ohlc.Count = uint32(el[7].(float64))
-		*pi = append(*pi, ohlc)
+func (pi *OHLCResp) UnmarshalJSON(data []byte) error {
+	dataMap := make(map[string]interface{})
+	json.Unmarshal(data, &dataMap)
+	pi.Last = uint64(dataMap["last"].(float64))
+	for key := range dataMap {
+		if key != "last" {
+			pi.Ticker = key
+			tempDataSlice, ok := dataMap[key].([]interface{})
+			if !ok {
+				return fmt.Errorf("OHLCDataSlice assertion error")
+			} else {
+				for i, v := range tempDataSlice {
+					item, ok := v.([]interface{})
+					if !ok {
+						return fmt.Errorf("OHLCData item assertion error")
+					} else {
+						ohlcData := OHLCData{
+							Time:   uint64(item[0].(float64)),
+							Open:   item[1].(string),
+							High:   item[2].(string),
+							Low:    item[3].(string),
+							Close:  item[4].(string),
+							VWAP:   item[5].(string),
+							Volume: item[6].(string),
+							Count:  uint32(item[7].(float64)),
+						}
+						if i == len(tempDataSlice)-1 {
+							pi.Current = ohlcData
+						} else {
+							pi.Data = append(pi.Data, ohlcData)
+						}
+					}
+				}
+			}
+		}
 	}
 	return nil
 }
