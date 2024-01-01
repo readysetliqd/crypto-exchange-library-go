@@ -456,7 +456,7 @@ func callPublicApi(endpoint string, target interface{}) error {
 //
 // interval enum: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
 func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
-	endpoint := fmt.Sprintf("OHLC?interval=%v", interval)
+	endpoint := fmt.Sprintf("OHLC?pair=%s&interval=%v", pair, interval)
 	OHLC := &data.OHLCResp{}
 	if len(since) > 0 {
 		if len(since) > 1 {
