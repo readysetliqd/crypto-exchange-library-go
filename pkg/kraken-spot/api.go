@@ -427,7 +427,10 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 		}
 		endpoint += fmt.Sprintf("&since=%v", since)
 	}
-	callPublicApi(endpoint, OHLC)
+	err := callPublicApi(endpoint, OHLC)
+	if err != nil {
+		log.Println(err)
+	}
 	return OHLC, nil
 }
 
@@ -444,7 +447,6 @@ func callPublicApi(endpoint string, target interface{}) error {
 
 	if res.StatusCode == http.StatusOK {
 		resp := data.ApiResp{Result: target}
-		respMap := map[string]interface{}{}
 		msg, err := io.ReadAll(res.Body)
 		if err != nil {
 			return fmt.Errorf("error calling io.readall | %v", err)
@@ -452,13 +454,6 @@ func callPublicApi(endpoint string, target interface{}) error {
 		err = json.Unmarshal(msg, &resp)
 		if err != nil {
 			return fmt.Errorf("error unmarshaling msg to ApiResp | %v", err)
-		}
-		err = json.Unmarshal(msg, &respMap)
-		if err != nil {
-			return fmt.Errorf("error unmarshaling msg to map | %v", err)
-		}
-		if _, ok := respMap["result"]; !ok {
-			return fmt.Errorf("api error | no \"result\" field")
 		}
 		if len(resp.Error) != 0 {
 			return fmt.Errorf("api error(s) | %v", resp.Error)
