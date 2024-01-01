@@ -160,12 +160,36 @@ type TickerTrades struct {
 	NumTrades int
 }
 
+func (r *OHLCResp) UnmarshalJSON(data []byte) error {
+	// Define a temporary structure to hold the raw JSON fields
+	type rawOHLCResp struct {
+		Data map[string]json.RawMessage `json:"result"`
+		Last uint64                     `json:"last"`
+	}
+
+	var raw rawOHLCResp
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	r.Last = raw.Last
+	r.Data = make(map[string]OHLCDataSlice)
+
+	for k, v := range raw.Data {
+		var ohlcDataSlice OHLCDataSlice
+		if err := json.Unmarshal(v, &ohlcDataSlice); err != nil {
+			return err
+		}
+		r.Data[k] = ohlcDataSlice
+	}
+
+	return nil
+}
+
 type OHLCResp struct {
 	Data map[string]OHLCDataSlice
 	Last uint64 `json:"last"`
 }
-
-type OHLCDataSlice []OHLCData
 
 type OHLCData struct {
 	Time   uint64
@@ -177,6 +201,8 @@ type OHLCData struct {
 	Volume string
 	Count  uint32
 }
+
+type OHLCDataSlice []OHLCData
 
 func (pi *OHLCDataSlice) UnmarshalJSON(data []byte) error {
 	var v []interface{}
