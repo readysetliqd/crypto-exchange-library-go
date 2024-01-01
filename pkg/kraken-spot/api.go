@@ -434,6 +434,37 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 	return OHLC, nil
 }
 
+// Calls Kraken API public market data "Depth" endpoint. Gets arrays of bids and
+// asks for arg pair. Optional arg count will return count number of each bids
+// and asks. Not passing an arg to count will default to 100.
+//
+// count enum: [1,500]
+func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
+	var initialCapacity uint16
+	endpoint := fmt.Sprintf("Depth?pair=%s", pair)
+	orderBook := make(map[string]data.OrderBook, initialCapacity)
+	if len(count) > 0 {
+		initialCapacity = count[0]
+		if initialCapacity > 500 || count[0] < 1 {
+			err := fmt.Errorf("invalid number passed to count")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", count[0])
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for arg: count func: GetOrderBook(). excpected 0 or 1")
+			return nil, err
+		}
+		callPublicApi(endpoint, &orderBook)
+	}
+	var assetInfo data.OrderBook
+	for key := range orderBook {
+		assetInfo = orderBook[key]
+		assetInfo.Ticker = key
+		break
+	}
+	return &assetInfo, nil
+}
+
 // Calls Kraken's public api endpoint. Args endpoint string should match the url
 // endpoint from the api docs. Args target interface{} should be a pointer to
 // an empty struct of the matching endpoint data type

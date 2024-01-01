@@ -221,3 +221,28 @@ func (pi *OHLCResp) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+type OrderBook struct {
+	Ticker string
+	Asks   []BookEntry `json:"asks"`
+	Bids   []BookEntry `json:"bids"`
+}
+
+type BookEntry struct {
+	Price  string
+	Volume string
+	Time   uint64
+}
+
+func (pi *BookEntry) UnmarshalJSON(data []byte) error {
+	var v []interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 3 {
+		pi.Price = v[0].(string)
+		pi.Volume = v[1].(string)
+		pi.Time = uint64(v[2].(float64))
+	}
+	return nil
+}
