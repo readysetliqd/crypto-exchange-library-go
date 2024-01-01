@@ -161,9 +161,11 @@ type TickerTrades struct {
 }
 
 type OHLCResp struct {
-	Data map[string][]OHLCData
+	Data map[string]OHLCDataSlice
 	Last uint64 `json:"last"`
 }
+
+type OHLCDataSlice []OHLCData
 
 type OHLCData struct {
 	Time   uint64
@@ -176,20 +178,23 @@ type OHLCData struct {
 	Count  uint32
 }
 
-func (pi *OHLCData) UnmarshalJSON(data []byte) error {
+func (pi *OHLCDataSlice) UnmarshalJSON(data []byte) error {
 	var v []interface{}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
-	if len(v) >= 8 {
-		pi.Time = uint64(v[0].(float64))
-		pi.Open = v[1].(string)
-		pi.High = v[2].(string)
-		pi.Low = v[3].(string)
-		pi.Close = v[4].(string)
-		pi.VWAP = v[5].(string)
-		pi.Volume = v[6].(string)
-		pi.Count = uint32(v[7].(float64))
+	for _, element := range v {
+		var ohlc OHLCData
+		el := element.([]interface{})
+		ohlc.Time = uint64(el[0].(float64))
+		ohlc.Open = el[1].(string)
+		ohlc.High = el[2].(string)
+		ohlc.Low = el[3].(string)
+		ohlc.Close = el[4].(string)
+		ohlc.VWAP = el[5].(string)
+		ohlc.Volume = el[6].(string)
+		ohlc.Count = uint32(el[7].(float64))
+		*pi = append(*pi, ohlc)
 	}
 	return nil
 }
