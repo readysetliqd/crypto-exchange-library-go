@@ -159,3 +159,37 @@ type TickerTrades struct {
 	Ticker    string
 	NumTrades int
 }
+
+type OHLCResp struct {
+	Data map[string][]OHLCData
+	Last uint64 `json:"last"`
+}
+
+type OHLCData struct {
+	Time   uint64
+	Open   string
+	High   string
+	Low    string
+	Close  string
+	VWAP   string
+	Volume string
+	Count  uint32
+}
+
+func (pi *OHLCData) UnmarshalJSON(data []byte) error {
+	var v []interface{}
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	if len(v) >= 8 {
+		pi.Time = uint64(v[0].(float64))
+		pi.Open = v[1].(string)
+		pi.High = v[2].(string)
+		pi.Low = v[3].(string)
+		pi.Close = v[4].(string)
+		pi.VWAP = v[5].(string)
+		pi.Volume = v[6].(string)
+		pi.Count = uint32(v[7].(float64))
+	}
+	return nil
+}

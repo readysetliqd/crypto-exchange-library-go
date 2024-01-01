@@ -372,7 +372,7 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 // sorted pairs.
 func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) {
 	if len(num) > 1 {
-		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+		err := fmt.Errorf("too many arguments passed into ListTopNumberTradesLast24Hours(). excpected 0 or 1")
 		return nil, err
 	}
 	topTradesTickers := make([]data.TickerTrades, 0, data.TickersMapSize)
@@ -444,4 +444,27 @@ func callPublicApi(endpoint string, target interface{}) error {
 		return fmt.Errorf("http status code not OK status code | %v", res.StatusCode)
 	}
 	return nil
+}
+
+// Calls Kraken API public market data "OHLC" endpoint. Gets OHLC data for
+// specified pair of the required interval (in minutes).
+//
+// Accepts optional arg since as a start time in Unix for the data. However,
+// per the Kraken API docs "Note: the last entry in the OHLC array is for the
+// current, not-yet-committed frame and will always be present, regardless of
+// the value of since.
+//
+// interval enum: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
+	endpoint := fmt.Sprintf("OHLC?interval=%v", interval)
+	OHLC := &data.OHLCResp{}
+	if len(since) > 0 {
+		if len(since) > 1 {
+			err := fmt.Errorf("too many arguments passed for arg: since func: GetOHLC(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&since=%v", since)
+	}
+	callPublicApi(endpoint, OHLC)
+	return OHLC, nil
 }
