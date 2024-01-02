@@ -439,19 +439,6 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 	return topTradesTickers, nil
 }
 
-// Parses volume and VWAP from tickers using ticker for volume and pair for VWAP
-func parseVolumeVwap(ticker string, pair string, tickers *map[string]data.TickerInfo) (float64, float64, error) {
-	volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
-	if err != nil {
-		return 0, 0, err
-	}
-	vwap, err := strconv.ParseFloat((*tickers)[pair].VWAP.Last24Hours, 64)
-	if err != nil {
-		return 0, 0, err
-	}
-	return volume, vwap, nil
-}
-
 // Calls Kraken API public market data "OHLC" endpoint. Gets OHLC data for
 // specified pair of the required interval (in minutes).
 //
@@ -466,7 +453,7 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 	OHLC := &data.OHLCResp{}
 	if len(since) > 0 {
 		if len(since) > 1 {
-			err := fmt.Errorf("too many arguments passed for arg: since func: GetOHLC(). excpected 0 or 1")
+			err := fmt.Errorf("too many arguments passed for func: GetOHLC(). excpected 2 or 3 including args 'pair' and 'interval'")
 			return nil, err
 		}
 		endpoint += fmt.Sprintf("&since=%v", since)
@@ -479,27 +466,27 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 }
 
 // Calls Kraken API public market data "Depth" endpoint. Gets arrays of bids and
-// asks for arg pair. Optional arg count will return count number of each bids
-// and asks. Not passing an arg to count will default to 100.
+// asks for arg 'pair'. Optional arg 'count' will return count number of each bids
+// and asks. Not passing an arg to 'count' will default to 100.
 //
-// count enum: [1,500]
+// 'count' enum: [1..500]
 func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 	var initialCapacity uint16
 	endpoint := fmt.Sprintf("Depth?pair=%s", pair)
-	orderBook := make(map[string]data.OrderBook, initialCapacity)
 	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetOrderBook(). expected 1 or 2 including the 'pair' argument")
+			return nil, err
+		}
 		initialCapacity = count[0]
 		if initialCapacity > 500 || count[0] < 1 {
-			err := fmt.Errorf("invalid number passed to count")
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
 			return nil, err
 		}
 		endpoint += fmt.Sprintf("&count=%v", count[0])
-		if len(count) > 1 {
-			err := fmt.Errorf("too many arguments passed for arg: count func: GetOrderBook(). excpected 0 or 1")
-			return nil, err
-		}
-		callPublicApi(endpoint, &orderBook)
 	}
+	orderBook := make(map[string]data.OrderBook, initialCapacity)
+	callPublicApi(endpoint, &orderBook)
 	var assetInfo data.OrderBook
 	for key := range orderBook {
 		assetInfo = orderBook[key]
@@ -509,8 +496,69 @@ func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 	return &assetInfo, nil
 }
 
-// Calls Kraken's public api endpoint. Args endpoint string should match the url
-// endpoint from the api docs. Args target interface{} should be a pointer to
+// Calls Kraken API public market data "Trades" endpoint. Gets the most
+// recent trades for arg 'pair'. Accepts optional arg 'count' to get 'count'
+// number of recent trades. Not passing an arg to 'count' will default to 1000
+//
+// 'count' enum [1..1000]
+func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
+	var initialCapacity uint16
+	endpoint := "Trades?pair=" + pair
+	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetTrades(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		initialCapacity = count[0]
+		if initialCapacity > 1000 || initialCapacity < 1 {
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", initialCapacity)
+	} else {
+		initialCapacity = 1000
+	}
+	trades := data.TradesResp{}
+	err := callPublicApi(endpoint, &trades)
+	if err != nil {
+		return nil, err
+	}
+	return &trades, nil
+}
+
+// Calls Kraken API public market data "Trades" endpoint. Gets the trades after
+// unix time arg 'since' for arg 'pair'. Accepts optional arg 'count' to get
+// 'count' number of trades after 'since'. Not passing an arg to 'count' will
+// default to 1000
+//
+// 'count' enum [1..1000]
+func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesResp, error) {
+	var initialCapacity uint16
+	endpoint := fmt.Sprintf("Trades?pair=%s&since=%v", pair, since)
+	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetTrades(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		initialCapacity = count[0]
+		if initialCapacity > 1000 || initialCapacity < 1 {
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", initialCapacity)
+	} else {
+		initialCapacity = 1000
+	}
+	trades := data.TradesResp{}
+	err := callPublicApi(endpoint, &trades)
+	if err != nil {
+		return nil, err
+	}
+	return &trades, nil
+}
+
+// Calls Kraken's public api endpoint. Arg 'endpoint' should match the url
+// endpoint from the api docs. Arg 'target' interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
 func callPublicApi(endpoint string, target interface{}) error {
 	url := data.PublicApiUrl + endpoint
@@ -537,4 +585,17 @@ func callPublicApi(endpoint string, target interface{}) error {
 		return fmt.Errorf("http status code not OK status code | %v", res.StatusCode)
 	}
 	return nil
+}
+
+// Parses volume and VWAP from tickers using ticker for volume and pair for VWAP
+func parseVolumeVwap(ticker string, pair string, tickers *map[string]data.TickerInfo) (float64, float64, error) {
+	volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	vwap, err := strconv.ParseFloat((*tickers)[pair].VWAP.Last24Hours, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	return volume, vwap, nil
 }

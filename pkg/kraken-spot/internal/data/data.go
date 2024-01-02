@@ -3,6 +3,7 @@ package data
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 type ApiResp struct {
@@ -249,6 +250,67 @@ func (pi *BookEntry) UnmarshalJSON(data []byte) error {
 		pi.Price = v[0].(string)
 		pi.Volume = v[1].(string)
 		pi.Time = uint64(v[2].(float64))
+	}
+	return nil
+}
+
+type TradesResp struct {
+	Ticker string
+	Trades TradeSlice
+	Last   float64 `json:"last"`
+}
+
+type TradeSlice []Trade
+
+type Trade struct {
+	Price     string
+	Volume    string
+	Time      float64
+	Side      string
+	OrderType string
+	Misc      string
+}
+
+func (pi *TradesResp) UnmarshalJSON(data []byte) error {
+	var err error
+	dataMap := make(map[string]interface{})
+	json.Unmarshal(data, &dataMap)
+	lastStr, ok := dataMap["last"].(string)
+	if !ok {
+		err = fmt.Errorf("error asserting 'last' to string")
+		return err
+	}
+	pi.Last, err = strconv.ParseFloat(lastStr, 64)
+	if err != nil {
+		return err
+	}
+	for key, data := range dataMap {
+		if key != "last" {
+			pi.Ticker = key
+			tradeData, ok := data.([]interface{})
+			if !ok {
+				err = fmt.Errorf("error asserting 'data' to TradeSlice")
+				return err
+			}
+			trades := make(TradeSlice, len(tradeData))
+			for i, td := range tradeData {
+				tradeInfo, ok := td.([]interface{})
+				if !ok || len(tradeInfo) < 6 {
+					err = fmt.Errorf("error asserting 'tradeData' to []interface{} or not enough data")
+					return err
+				}
+				trades[i] = Trade{
+					Price:     tradeInfo[0].(string),
+					Volume:    tradeInfo[1].(string),
+					Time:      tradeInfo[2].(float64),
+					Side:      tradeInfo[3].(string),
+					OrderType: tradeInfo[4].(string),
+					Misc:      tradeInfo[5].(string),
+				}
+			}
+			pi.Trades = trades
+			break
+		}
 	}
 	return nil
 }
