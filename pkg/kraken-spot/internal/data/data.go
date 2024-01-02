@@ -111,51 +111,51 @@ type TickerDailyInfoInt struct {
 	Last24Hours int
 }
 
-func (pi *TickerBookInfo) UnmarshalJSON(data []byte) error {
+func (ti *TickerBookInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	if len(v) >= 3 {
-		pi.Price = v[0]
-		pi.WholeLotVolume = v[1]
-		pi.LotVolume = v[2]
+		ti.Price = v[0]
+		ti.WholeLotVolume = v[1]
+		ti.LotVolume = v[2]
 	}
 	return nil
 }
 
-func (pi *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
+func (ti *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	if len(v) >= 2 {
-		pi.Price = v[0]
-		pi.LotVolume = v[1]
+		ti.Price = v[0]
+		ti.LotVolume = v[1]
 	}
 	return nil
 }
 
-func (pi *TickerDailyInfo) UnmarshalJSON(data []byte) error {
+func (ti *TickerDailyInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	if len(v) >= 2 {
-		pi.Today = v[0]
-		pi.Last24Hours = v[1]
+		ti.Today = v[0]
+		ti.Last24Hours = v[1]
 	}
 	return nil
 }
 
-func (pi *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
+func (ti *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
 	var v []int
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	if len(v) >= 2 {
-		pi.Today = v[0]
-		pi.Last24Hours = v[1]
+		ti.Today = v[0]
+		ti.Last24Hours = v[1]
 	}
 	return nil
 }
@@ -190,13 +190,13 @@ type OHLCData struct {
 	Count  uint32
 }
 
-func (pi *OHLCResp) UnmarshalJSON(data []byte) error {
+func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
 	dataMap := make(map[string]interface{})
 	json.Unmarshal(data, &dataMap)
-	pi.Last = uint64(dataMap["last"].(float64))
+	ohlc.Last = uint64(dataMap["last"].(float64))
 	for key := range dataMap {
 		if key != "last" {
-			pi.Ticker = key
+			ohlc.Ticker = key
 			tempDataSlice, ok := dataMap[key].([]interface{})
 			if !ok {
 				return fmt.Errorf("OHLCDataSlice assertion error")
@@ -217,9 +217,9 @@ func (pi *OHLCResp) UnmarshalJSON(data []byte) error {
 							Count:  uint32(item[7].(float64)),
 						}
 						if i == len(tempDataSlice)-1 {
-							pi.Current = ohlcData
+							ohlc.Current = ohlcData
 						} else {
-							pi.Data = append(pi.Data, ohlcData)
+							ohlc.Data = append(ohlc.Data, ohlcData)
 						}
 					}
 				}
@@ -241,15 +241,15 @@ type BookEntry struct {
 	Time   uint64
 }
 
-func (pi *BookEntry) UnmarshalJSON(data []byte) error {
+func (be *BookEntry) UnmarshalJSON(data []byte) error {
 	var v []interface{}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	if len(v) >= 3 {
-		pi.Price = v[0].(string)
-		pi.Volume = v[1].(string)
-		pi.Time = uint64(v[2].(float64))
+		be.Price = v[0].(string)
+		be.Volume = v[1].(string)
+		be.Time = uint64(v[2].(float64))
 	}
 	return nil
 }
@@ -271,7 +271,7 @@ type Trade struct {
 	Misc      string
 }
 
-func (pi *TradesResp) UnmarshalJSON(data []byte) error {
+func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 	var err error
 	dataMap := make(map[string]interface{})
 	json.Unmarshal(data, &dataMap)
@@ -280,13 +280,13 @@ func (pi *TradesResp) UnmarshalJSON(data []byte) error {
 		err = fmt.Errorf("error asserting 'last' to string")
 		return err
 	}
-	pi.Last, err = strconv.ParseFloat(lastStr, 64)
+	tr.Last, err = strconv.ParseFloat(lastStr, 64)
 	if err != nil {
 		return err
 	}
 	for key, data := range dataMap {
 		if key != "last" {
-			pi.Ticker = key
+			tr.Ticker = key
 			tradeData, ok := data.([]interface{})
 			if !ok {
 				err = fmt.Errorf("error asserting 'data' to TradeSlice")
@@ -308,7 +308,59 @@ func (pi *TradesResp) UnmarshalJSON(data []byte) error {
 					Misc:      tradeInfo[5].(string),
 				}
 			}
-			pi.Trades = trades
+			tr.Trades = trades
+			break
+		}
+	}
+	return nil
+}
+
+type SpreadResp struct {
+	Ticker  string
+	Spreads SpreadSlice
+	Last    uint64 `json:"last"`
+}
+
+type SpreadSlice []Spread
+
+type Spread struct {
+	Time uint64
+	Bid  string
+	Ask  string
+}
+
+func (sr *SpreadResp) UnmarshalJSON(data []byte) error {
+	var err error
+	dataMap := make(map[string]interface{})
+	json.Unmarshal(data, &dataMap)
+	lastStr, ok := dataMap["last"].(float64)
+	if !ok {
+		err = fmt.Errorf("error asserting 'last' to string")
+		return err
+	}
+	sr.Last = uint64(lastStr)
+	for key, data := range dataMap {
+		if key != "last" {
+			sr.Ticker = key
+			spreadData, ok := data.([]interface{})
+			if !ok {
+				err = fmt.Errorf("error asserting 'data' to []interface{}")
+				return err
+			}
+			spreads := make(SpreadSlice, len(spreadData))
+			for i, sd := range spreadData {
+				spread, ok := sd.([]interface{})
+				if !ok || len(spread) < 3 {
+					err = fmt.Errorf("error asserting 'sd' to []interface{} or not enough data")
+					return err
+				}
+				spreads[i] = Spread{
+					Time: uint64(spread[0].(float64)),
+					Bid:  spread[1].(string),
+					Ask:  spread[2].(string),
+				}
+			}
+			sr.Spreads = spreads
 			break
 		}
 	}

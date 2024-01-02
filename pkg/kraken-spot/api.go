@@ -557,6 +557,29 @@ func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesRes
 	return &trades, nil
 }
 
+// Calls Kraken API public market data "Spread" endpoint. Returns the last ~200
+// top-of-book spreads for given arg 'pair'.
+//
+// Note: arg 'since' intended for incremental updates within available dataset
+// (does not contain all historical spreads)
+func GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
+	endpoint := "Spread?pair=" + pair
+	if len(since) > 0 {
+		if len(since) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetSpread(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&since=%v", since[0])
+	}
+	var resp data.SpreadResp
+	log.Println(endpoint)
+	err := callPublicApi(endpoint, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // Calls Kraken's public api endpoint. Arg 'endpoint' should match the url
 // endpoint from the api docs. Arg 'target' interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
