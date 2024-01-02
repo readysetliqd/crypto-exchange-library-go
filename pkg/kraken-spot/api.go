@@ -59,6 +59,11 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Add ticker to each AssetInfo
+	for ticker, info := range allAssetInfo {
+		info.Ticker = ticker
+		allAssetInfo[ticker] = info
+	}
 	return &allAssetInfo, nil
 }
 
@@ -85,6 +90,11 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	err := callPublicApi(endpoint, &assetInfo)
 	if err != nil {
 		return nil, err
+	}
+	// Add ticker to each AssetInfo
+	for ticker, info := range assetInfo {
+		info.Ticker = ticker
+		assetInfo[ticker] = info
 	}
 	info := assetInfo[asset]
 	return &info, nil
@@ -113,6 +123,11 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 	if err != nil {
 		return nil, err
 	}
+	// Add ticker to each AssetPairInfo
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
 	return &pairInfo, nil
 }
 
@@ -138,6 +153,11 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
+	}
+	// Add ticker to each AssetPairMargin
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
 	}
 	return &pairInfo, nil
 }
@@ -165,6 +185,11 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 	if err != nil {
 		return nil, err
 	}
+	// Add ticker to each AssetPairFees
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
 	return &pairInfo, nil
 }
 
@@ -190,6 +215,11 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
+	}
+	// Add ticker to each AssetPairLeverage
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
 	}
 	return &pairInfo, nil
 }
@@ -253,29 +283,43 @@ func MapWebsocketNames() (map[string]bool, error) {
 	return websocketNames, nil
 }
 
-// Calls Kraken API public market data "Ticker" endpoint. Calling function
-// without arguments gets tickers for all tradable asset pairs. Accepts one
-// optional argument for the "pair" query parameter. If multiple pairs are
-// desired, pass them as one comma delimited string into the pair argument.
+// Calls Kraken API public market data "Ticker" endpoint. Accepts one argument
+// for the "pair" query parameter. If multiple pairs are desired, pass them as
+// one comma delimited string into the pair argument.
 //
 // Note: Today's prices start at midnight UTC
-func GetTickerInfo(pair ...string) (*map[string]data.TickerInfo, error) {
-	var initialCapacity int
-	endpoint := "Ticker"
-	if len(pair) > 0 {
-		initialCapacity = 1
-		if len(pair) > 1 {
-			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
-			return nil, err
-		}
-		endpoint += "?pair=" + pair[0]
-	} else {
-		initialCapacity = data.PairsMapSize
-	}
+func GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
+	initialCapacity := 1
+	endpoint := "Ticker?pair=" + pair
 	tickers := make(map[string]data.TickerInfo, initialCapacity)
 	err := callPublicApi(endpoint, &tickers)
 	if err != nil {
 		return nil, err
+	}
+	// Add ticker to each TickerInfo
+	for ticker, info := range tickers {
+		info.Ticker = ticker
+		tickers[ticker] = info
+	}
+	return &tickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Gets ticker info for
+// all tradeable pairs.
+//
+// Note: Today's prices start at midnight UTC
+func GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
+	initialCapacity := data.PairsMapSize
+	endpoint := "Ticker"
+	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	err := callPublicApi(endpoint, &tickers)
+	if err != nil {
+		return nil, err
+	}
+	// Add ticker to each TickerInfo
+	for ticker, info := range tickers {
+		info.Ticker = ticker
+		tickers[ticker] = info
 	}
 	return &tickers, nil
 }
@@ -291,7 +335,7 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 		return nil, err
 	}
 	topVolumeTickers := make([]data.TickerVolume, 0, data.TickersMapSize)
-	tickers, err := GetTickerInfo()
+	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +420,7 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 		return nil, err
 	}
 	topTradesTickers := make([]data.TickerTrades, 0, data.TickersMapSize)
-	tickers, err := GetTickerInfo()
+	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
 	}

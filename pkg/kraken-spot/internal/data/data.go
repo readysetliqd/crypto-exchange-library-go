@@ -21,6 +21,7 @@ type SystemStatus struct {
 }
 
 type AssetInfo struct {
+	Ticker          string
 	Aclass          string  `json:"aclass"`
 	Altname         string  `json:"altname"`
 	Decimals        uint8   `json:"decimals"`
@@ -30,6 +31,7 @@ type AssetInfo struct {
 }
 
 type AssetPairInfo struct {
+	Ticker             string
 	Altname            string      `json:"altname"`
 	Wsname             string      `json:"wsname"`
 	AclassBase         string      `json:"aclass_base"`
@@ -56,22 +58,26 @@ type AssetPairInfo struct {
 }
 
 type AssetPairMargin struct {
+	Ticker      string
 	MarginCall  uint8 `json:"margin_call"`
 	MarginLevel uint8 `json:"margin_level"`
 }
 
 type AssetPairFees struct {
+	Ticker            string
 	Fees              [][]float64 `json:"fees"`
 	FeesMaker         [][]float64 `json:"fees_maker"`
 	FeeVolumeCurrency string      `json:"fee_volume_currency"`
 }
 
 type AssetPairLeverage struct {
+	Ticker       string
 	LeverageBuy  []uint8 `json:"leverage_buy"`
 	LeverageSell []uint8 `json:"leverage_sell"`
 }
 
 type TickerInfo struct {
+	Ticker          string
 	Ask             TickerBookInfo      `json:"a"`
 	Bid             TickerBookInfo      `json:"b"`
 	LastTradeClosed TickerLastTradeInfo `json:"c"`
