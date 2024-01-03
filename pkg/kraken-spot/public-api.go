@@ -54,7 +54,7 @@ func SystemIsOnline() (bool, string) {
 // all assets that are available for deposit, withdrawal, trading and staking.
 // Returns them as *map[string]data.AssetInfo where the string is the asset name.
 func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
-	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
+	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
 	err := callPublicApi("Assets", &allAssetInfo)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 // Calls Kraken API public market data "Assets" endpoint. Returns a slice of
 // strings of all tradeable asset names
 func ListAssets() ([]string, error) {
-	allAssetInfo := make(map[string]data.AssetInfo, data.AssetsMapSize)
+	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
 	err := callPublicApi("Assets", &allAssetInfo)
 	if err != nil {
 		return nil, err
@@ -116,7 +116,7 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 		}
 		endpoint += "?pair=" + pair[0]
 	} else {
-		initialCapacity = data.PairsMapSize
+		initialCapacity = pairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
@@ -147,7 +147,7 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 		}
 		endpoint += "&pair=" + pair[0]
 	} else {
-		initialCapacity = data.PairsMapSize
+		initialCapacity = pairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
@@ -178,7 +178,7 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 		}
 		endpoint += "&pair=" + pair[0]
 	} else {
-		initialCapacity = data.PairsMapSize
+		initialCapacity = pairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
@@ -209,7 +209,7 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 		}
 		endpoint += "&pair=" + pair[0]
 	} else {
-		initialCapacity = data.PairsMapSize
+		initialCapacity = pairsMapSize
 	}
 	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
@@ -276,7 +276,7 @@ func MapWebsocketNames() (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	websocketNames := make(map[string]bool, data.PairsMapSize)
+	websocketNames := make(map[string]bool, pairsMapSize)
 	for pair := range *pairInfo {
 		websocketNames[(*pairInfo)[pair].Wsname] = true
 	}
@@ -309,7 +309,7 @@ func GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
 //
 // Note: Today's prices start at midnight UTC
 func GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
-	initialCapacity := data.PairsMapSize
+	initialCapacity := pairsMapSize
 	endpoint := "Ticker"
 	tickers := make(map[string]data.TickerInfo, initialCapacity)
 	err := callPublicApi(endpoint, &tickers)
@@ -334,7 +334,7 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 		return nil, err
 	}
-	topVolumeTickers := make([]data.TickerVolume, 0, data.TickersMapSize)
+	topVolumeTickers := make([]data.TickerVolume, 0, tickersMapSize)
 	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
@@ -419,7 +419,7 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 		err := fmt.Errorf("too many arguments passed into ListTopNumberTradesLast24Hours(). excpected 0 or 1")
 		return nil, err
 	}
-	topTradesTickers := make([]data.TickerTrades, 0, data.TickersMapSize)
+	topTradesTickers := make([]data.TickerTrades, 0, tickersMapSize)
 	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
@@ -583,7 +583,7 @@ func GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
 // endpoint from the api docs. Arg 'target' interface{} should be a pointer to
 // an empty struct of the matching endpoint data type
 func callPublicApi(endpoint string, target interface{}) error {
-	url := data.PublicApiUrl + endpoint
+	url := baseUrl + publicPrefix + endpoint
 	res, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("error getting response from url %v | %v", url, err)

@@ -11,6 +11,7 @@ type ApiResp struct {
 	Result interface{} `json:"result"`
 }
 
+// #region Public Market Data structs
 type ServerTime struct {
 	UnixTime int    `json:"unixtime"`
 	Rfc1123  string `json:"rfc1123"`
@@ -365,4 +366,27 @@ func (sr *SpreadResp) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+} // #endregion
+
+// #region Private Account Data structs
+type ExtendedBalance struct {
+	Balance    string `json:"balance"`
+	Credit     string `json:"credit"`
+	CreditUsed string `json:"credit_used"`
+	HoldTrade  string `json:"hold_trade"`
 }
+
+type TradeBalance struct {
+	EquivalentBalance string `json:"eb"`
+	TradeBalance      string `json:"tb"`
+	OpenMargin        string `json:"m"`
+	UnrealizedPnL     string `json:"n"`
+	CostBasis         string `json:"c"`
+	FloatingValuation string `json:"v"`
+	Equity            string `json:"e"`
+	FreeMargin        string `json:"mf"`
+	MarginLevel       string `json:"ml"`
+	UnexecutedValue   string `json:"uv"`
+}
+
+// #endregion
