@@ -12,6 +12,7 @@ type ApiResp struct {
 }
 
 // #region Public Market Data structs
+
 type ServerTime struct {
 	UnixTime int    `json:"unixtime"`
 	Rfc1123  string `json:"rfc1123"`
@@ -366,9 +367,12 @@ func (sr *SpreadResp) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
-} // #endregion
+}
+
+// #endregion
 
 // #region Private Account Data structs
+
 type ExtendedBalance struct {
 	Balance    string `json:"balance"`
 	Credit     string `json:"credit"`
@@ -387,6 +391,47 @@ type TradeBalance struct {
 	FreeMargin        string `json:"mf"`
 	MarginLevel       string `json:"ml"`
 	UnexecutedValue   string `json:"uv"`
+}
+
+type OpenOrdersResp struct {
+	OpenOrders map[string]OpenOrder `json:"open"`
+}
+
+type OpenOrder struct {
+	RefID          string           `json:"refid"`
+	UserRef        int              `json:"userref"`
+	Status         string           `json:"status"`
+	OpenTime       float64          `json:"opentm"`
+	StartTime      float64          `json:"starttm"`
+	ExpireTime     float64          `json:"expiretm"`
+	Description    OrderDescription `json:"descr"`
+	Volume         string           `json:"vol"`
+	VolumeExecuted string           `json:"vol_exec"`
+	QuoteCost      string           `json:"cost"`
+	QuoteFee       string           `json:"fee"`
+	AvgPrice       string           `json:"price"`
+	StopPrice      string           `json:"stopprice"`
+	LimitPrice     string           `json:"limitprice"`
+	Trigger        string           `json:"trigger"`
+	Misc           string           `json:"misc"`
+	OrderFlags     string           `json:"oflags"`
+	TradeIDs       []string         `json:"trades"`
+}
+
+type OrderDescription struct {
+	Pair             string `json:"pair"`
+	Side             string `json:"type"`
+	OrderType        string `json:"ordertype"`
+	Price            string `json:"price"`  // Limit price for limit orders. Trigger price for stop-loss, stop-loss-limit, take-profit, take-profit-limit, trailing-stop, and trailing-stop-limit orders
+	Price2           string `json:"price2"` // Secondary limit price for stop-loss-limit, take-profit-limit, and trailing-stop-limit orders
+	Leverage         string `json:"leverage"`
+	Description      string `json:"order"`
+	CloseDescription string `json:"close"`
+}
+
+type GetOpenOrdersParams struct {
+	Trades  *bool
+	UserRef *int32
 }
 
 // #endregion

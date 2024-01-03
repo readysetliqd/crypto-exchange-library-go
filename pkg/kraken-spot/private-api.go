@@ -110,7 +110,7 @@ func (kc *KrakenClient) GetAccountBalances() (*map[string]string, error) {
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 	res, err := kc.doRequest(privatePrefix+"Balance", payload)
 	if err != nil {
-		err := fmt.Errorf("error sending request to server")
+		err = fmt.Errorf("error sending request to server | %w", err)
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -147,7 +147,7 @@ func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance,
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 	res, err := kc.doRequest(privatePrefix+"BalanceEx", payload)
 	if err != nil {
-		err := fmt.Errorf("error sending request to server")
+		err = fmt.Errorf("error sending request to server | %w", err)
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -264,7 +264,7 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 	}
 	res, err := kc.doRequest(privatePrefix+"TradeBalance", payload)
 	if err != nil {
-		err := fmt.Errorf("error sending request to server")
+		err = fmt.Errorf("error sending request to server | %w", err)
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -276,11 +276,37 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 	return &balance, nil
 }
 
-// func (kc *KrakenClient) GetOpenOrders() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
-// 	// change return statement
-// 	return nil, nil
-// }
+// Calls Kraken API private Account Data "OpenOrders" endpoint. Retrieves
+// information for all currently open orders. Accepts optional arg 'params'.
+// If no params are included, defaults to trades=false and no user reference id
+// restrictions in returned data.
+//
+// Required Permissions: Order and Trades - Query open orders & trades
+func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.OpenOrdersResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send Request to Kraken API
+	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var openOrders data.OpenOrdersResp
+	err = processPrivateApiResponse(res, &openOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &openOrders, nil
+}
 
 // func (kc *KrakenClient) GetClosedOrders() (, error) {
 // 	// TODO create data type if necessary; implement function; write doc comments;
