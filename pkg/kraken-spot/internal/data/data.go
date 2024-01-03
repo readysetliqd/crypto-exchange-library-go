@@ -394,36 +394,15 @@ type TradeBalance struct {
 }
 
 type OpenOrdersResp struct {
-	OpenOrders map[string]OpenOrder `json:"open"`
-}
-
-type OpenOrder struct {
-	RefID          string           `json:"refid"`
-	UserRef        int              `json:"userref"`
-	Status         string           `json:"status"`
-	OpenTime       float64          `json:"opentm"`
-	StartTime      float64          `json:"starttm"`
-	ExpireTime     float64          `json:"expiretm"`
-	Description    OrderDescription `json:"descr"`
-	Volume         string           `json:"vol"`
-	VolumeExecuted string           `json:"vol_exec"`
-	QuoteCost      string           `json:"cost"`
-	QuoteFee       string           `json:"fee"`
-	AvgPrice       string           `json:"price"`
-	StopPrice      string           `json:"stopprice"`
-	LimitPrice     string           `json:"limitprice"`
-	Trigger        string           `json:"trigger"`
-	Misc           string           `json:"misc"`
-	OrderFlags     string           `json:"oflags"`
-	TradeIDs       []string         `json:"trades"`
+	OpenOrders map[string]Order `json:"open"`
 }
 
 type ClosedOrdersResp struct {
-	ClosedOrders map[string]ClosedOrder `json:"closed"`
-	Count        int                    `json:"count"`
+	ClosedOrders map[string]Order `json:"closed"`
+	Count        int              `json:"count"`
 }
 
-type ClosedOrder struct {
+type Order struct {
 	RefID          string           `json:"refid"`
 	UserRef        int              `json:"userref"`
 	Status         string           `json:"status"`
@@ -442,8 +421,8 @@ type ClosedOrder struct {
 	Misc           string           `json:"misc"`
 	OrderFlags     string           `json:"oflags"`
 	TradeIDs       []string         `json:"trades"`
-	CloseTime      float64          `json:"closetm"`
-	Reason         string           `json:"reason"`
+	CloseTime      float64          `json:"closetm,omitempty"`
+	Reason         string           `json:"reason,omitempty"`
 }
 
 type OrderDescription struct {

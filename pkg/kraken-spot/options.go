@@ -68,8 +68,8 @@ func COWithOffset(offset int) GetClosedOrdersOption {
 	}
 }
 
-// Which time to use to search. Defaults to "both" if not called or invalid
-// closeTime passed
+// Which time to use to search and filter results for COWithStart() and COWithEnd()
+// Defaults to "both" if not called or invalid arg 'closeTime' passed
 //
 // Enum: "open", "close", "both"
 func COWithCloseTime(closeTime string) GetClosedOrdersOption {

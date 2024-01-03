@@ -357,8 +357,8 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 //
 //	func COWithOffset(offset int) GetClosedOrdersOption
 //
-// // Which time to use to search. Defaults to "both" if not called or invalid
-// closeTime passed
+// // Which time to use to search and filter results for COWithStart() and COWithEnd()
+// Defaults to "both" if not called or invalid arg 'closeTime' passed
 //
 // // Enum: "open", "close", "both"
 //
@@ -368,6 +368,10 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 // true if not called
 //
 //	func COWithConsolidateTaker(consolidateTaker bool) GetClosedOrdersOption
+//
+// Example implementation:
+//
+//	orders, err := kc.GetClosedOrders(krakenspot.COWithConsolidateTaker(true), krakenspot.COWithCloseTime("open"))
 func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data.ClosedOrdersResp, error) {
 	// Build payload
 	payload := url.Values{}
@@ -394,11 +398,31 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 	return &closedOrders, nil
 }
 
-// func (kc *KrakenClient) GetOrdersInfo() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
-// 	// change return statement
-// 	return nil, nil
-// }
+// TODO
+// write docstring
+func (kc *KrakenClient) GetOrdersInfo(txID string) (*map[string]data.Order, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("txid", txID)
+
+	// Send request
+	res, err := kc.doRequest(privatePrefix+"QueryOrders", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var queriedOrders map[string]data.Order
+	err = processPrivateApiResponse(res, &queriedOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &queriedOrders, nil
+}
 
 // func (kc *KrakenClient) GetTradesHistory() (, error) {
 // 	// TODO create data type if necessary; implement function; write doc comments;
