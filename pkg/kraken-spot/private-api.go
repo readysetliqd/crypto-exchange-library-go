@@ -277,11 +277,26 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 }
 
 // Calls Kraken API private Account Data "OpenOrders" endpoint. Retrieves
-// information for all currently open orders. Accepts optional arg 'params'.
-// If no params are included, defaults to trades=false and no user reference id
-// restrictions in returned data.
+// information for all currently open orders. Accepts optional functions args
+// 'options'.
 //
 // Required Permissions: Order and Trades - Query open orders & trades
+//
+// Optional Functions:
+//
+// // Whether or not to include trades related to position in output. Defaults
+// to false if not called
+//
+//	func WithTrades(trades bool) GetOpenOrdersOption
+//
+// // Restrict results to given user reference id. Defaults to no restrictions
+// if not called
+//
+//	func WithUserRef(userRef int) GetOpenOrdersOption
+//
+// Example implementation:
+//
+//	orders, err := kc.GetOpenOrders(krakenspot.WithTrades(true), krakenspot.WithUserRef(123))
 func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.OpenOrdersResp, error) {
 	// Build payload
 	payload := url.Values{}
