@@ -287,16 +287,16 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 // // Whether or not to include trades related to position in output. Defaults
 // to false if not called
 //
-//	func WithTrades(trades bool) GetOpenOrdersOption
+//	func OOWithTrades(trades bool) GetOpenOrdersOption
 //
 // // Restrict results to given user reference id. Defaults to no restrictions
 // if not called
 //
-//	func WithUserRef(userRef int) GetOpenOrdersOption
+//	func OOWithUserRef(userRef int) GetOpenOrdersOption
 //
 // Example implementation:
 //
-//	orders, err := kc.GetOpenOrders(krakenspot.WithTrades(true), krakenspot.WithUserRef(123))
+//	orders, err := kc.GetOpenOrders(krakenspot.OOWithTrades(true), krakenspot.OOWithUserRef(123))
 func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.OpenOrdersResp, error) {
 	// Build payload
 	payload := url.Values{}
@@ -323,11 +323,76 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 	return &openOrders, nil
 }
 
-// func (kc *KrakenClient) GetClosedOrders() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
-// 	// change return statement
-// 	return nil, nil
-// }
+// Calls Kraken API private Account Data "ClosedOrders" endpoint. Retrieves
+// information for most recent closed orders. Accepts optional functions args
+// 'options'.
+//
+// Required Permissions: Order and Trades - Query closed orders & trades
+//
+// Optional Functions:
+//
+// // Whether or not to include trades related to position in output. Defaults
+// to false if not called
+//
+//	func COWithTrades(trades bool) GetClosedOrdersOption
+//
+// // Restrict results to given user reference id. Defaults to no restrictions
+// if not called
+//
+//	func COWithUserRef(userRef int) GetClosedOrdersOption
+//
+// // Starting unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used.
+// Defaults to show most recent orders if not called
+//
+//	func COWithStart(start int) GetClosedOrdersOption
+//
+// // Ending unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used
+// Defaults to show most recent orders if not called
+//
+//	func COWithEnd(end int) GetClosedOrdersOption
+//
+// // Result offset for pagination. Defaults to no offset if not called
+//
+//	func COWithOffset(offset int) GetClosedOrdersOption
+//
+// // Which time to use to search. Defaults to "both" if not called or invalid
+// closeTime passed
+//
+// // Enum: "open", "close", "both"
+//
+//	func COWithCloseTime(closeTime string) GetClosedOrdersOption
+//
+// // Whether or not to consolidate trades by individual taker trades. Defaults to
+// true if not called
+//
+//	func COWithConsolidateTaker(consolidateTaker bool) GetClosedOrdersOption
+func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data.ClosedOrdersResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send Request to Kraken API
+	res, err := kc.doRequest(privatePrefix+"ClosedOrders", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var closedOrders data.ClosedOrdersResp
+	err = processPrivateApiResponse(res, &closedOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &closedOrders, nil
+}
 
 // func (kc *KrakenClient) GetOrdersInfo() (, error) {
 // 	// TODO create data type if necessary; implement function; write doc comments;
