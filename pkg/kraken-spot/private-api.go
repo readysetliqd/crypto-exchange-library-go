@@ -398,13 +398,41 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 	return &closedOrders, nil
 }
 
-// TODO
-// write docstring
-func (kc *KrakenClient) GetOrdersInfo(txID string) (*map[string]data.Order, error) {
+// Calls Kraken API private Account Data "OrdersInfo" endpoint. Retrieves order
+// information for specific orders with transaction id passed to arg 'txID'.
+// Accepts multiple orders with transaction IDs passed as a single comma delimited
+// string with no white-space. Accepts optional functions args 'options'.
+//
+// Required Permissions: Order and Trades - Query closed orders & trades
+//
+// Optional Functions:
+//
+// // Whether or not to include trades related to position in output. Defaults
+// to false if not called
+//
+//	func OIWithTrades(trades bool) GetOrdersInfoOptions
+//
+// // Restrict results to given user reference id. Defaults to no restrictions
+// if not called
+//
+//	func OIWithUserRef(userRef int) GetOrdersInfoOptions
+//
+// // Whether or not to consolidate trades by individual taker trades. Defaults to
+// true if not called
+//
+//	func OIWithConsolidateTaker(consolidateTaker bool)
+//
+// Example implementation:
+//
+//	orders, err := kc.GetOrdersInfo("OYR15S-VHRBC-VY5NA2,OYBGFG-LQHXB-RJHY4C", krakenspot.OIWithConsolidateTaker(true))
+func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptions) (*map[string]data.Order, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 	payload.Add("txid", txID)
+	for _, option := range options {
+		option(payload)
+	}
 
 	// Send request
 	res, err := kc.doRequest(privatePrefix+"QueryOrders", payload)
@@ -424,62 +452,127 @@ func (kc *KrakenClient) GetOrdersInfo(txID string) (*map[string]data.Order, erro
 	return &queriedOrders, nil
 }
 
-// func (kc *KrakenClient) GetTradesHistory() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
-// 	// change return statement
-// 	return nil, nil
-// }
+// Calls Kraken API private Account Data "TradesHistory" endpoint. Retrieves
+// information about trades/fills. 50 results are returned at a time, the most
+// recent by default.
+//
+// Required Permissions: Order and Trades - Query closed orders & trades
+//
+// Optional Functions:
+//
+// // Type of trade. Defaults to "all" if not called or invalid 'tradeType' passed.
+//
+// // Enum: "all", "any position", "closed position", "closing position", "no position"
+//
+//	func THWithType(tradeType string) GetTradesHistoryOptions
+//
+// // Whether or not to include trades related to position in output. Defaults
+// to false if not called
+//
+//	func THWithTrades(trades bool) GetTradesHistoryOptions
+//
+// // Starting unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used.
+// Defaults to show most recent orders if not called
+//
+//	func THWithStart(start int) GetTradesHistoryOptions
+//
+// // Ending unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used
+// Defaults to show most recent orders if not called
+//
+//	func THWithEnd(end int) GetTradesHistoryOptions
+//
+// // Result offset for pagination. Defaults to no offset if not called
+//
+//	func THWithOffset(offset int) GetTradesHistoryOptions
+//
+// // Whether or not to consolidate trades by individual taker trades. Defaults to
+// true if not called
+//
+//	func THWithConsolidateTaker(consolidateTaker bool)
+//
+// Example implementation:
+//
+//	trades, err := kc.GetTradesHistory(krakenspot.THWithType("closed position"), krakenspot.THWithOffset(2))
+func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOptions) (*data.TradesHistoryResp, error) {
+	// TODO implement function; write doc comments; write functional options
+	// change return statement
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request
+	res, err := kc.doRequest(privatePrefix+"TradesHistory", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var tradesHistory data.TradesHistoryResp
+	err = processPrivateApiResponse(res, &tradesHistory)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &tradesHistory, nil
+}
 
 // func (kc *KrakenClient) GetTradesInfo() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) GetOpenPositions() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) GetLedgersInfo() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) GetLedgers() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) GetTradeVolume() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) RequestExportReport() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) GetExportReportStatus() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) RetrieveDataExport() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }
 
 // func (kc *KrakenClient) DeleteExportReport() (, error) {
-// 	// TODO create data type if necessary; implement function; write doc comments;
+// 	// TODO create data type if necessary; implement function; write doc comments; write functional options
 // 	// change return statement
 // 	return nil, nil
 // }

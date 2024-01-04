@@ -92,3 +92,90 @@ func COWithConsolidateTaker(consolidateTaker bool) GetClosedOrdersOption {
 		payload.Add("consolidate_taker", fmt.Sprintf("%v", consolidateTaker))
 	}
 }
+
+type GetOrdersInfoOptions func(payload url.Values)
+
+// Whether or not to include trades related to position in output. Defaults
+// to false if not called
+func OIWithTrades(trades bool) GetOrdersInfoOptions {
+	return func(payload url.Values) {
+		payload.Add("trades", fmt.Sprintf("%v", trades))
+	}
+}
+
+// Restrict results to given user reference id. Defaults to no restrictions
+// if not called
+func OIWithUserRef(userRef int) GetOrdersInfoOptions {
+	return func(payload url.Values) {
+		payload.Add("userref", fmt.Sprintf("%v", userRef))
+	}
+}
+
+// Whether or not to consolidate trades by individual taker trades. Defaults to
+// true if not called
+func OIWithConsolidateTaker(consolidateTaker bool) GetOrdersInfoOptions {
+	return func(payload url.Values) {
+		payload.Add("consolidate_taker", fmt.Sprintf("%v", consolidateTaker))
+	}
+}
+
+type GetTradesHistoryOptions func(payload url.Values)
+
+// Type of trade. Defaults to "all" if not called or invalid 'tradeType' passed.
+//
+// Enum: "all", "any position", "closed position", "closing position", "no position"
+func THWithType(tradeType string) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		validTradeTypes := map[string]bool{
+			"all":              true,
+			"any position":     true,
+			"closed position":  true,
+			"closing position": true,
+			"no position":      true,
+		}
+		if validTradeTypes[tradeType] {
+			payload.Add("type", tradeType)
+		}
+	}
+}
+
+// Whether or not to include trades related to position in output. Defaults
+// to false if not called
+func THWithTrades(trades bool) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		payload.Add("trades", fmt.Sprintf("%v", trades))
+	}
+}
+
+// Starting unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used.
+// Defaults to show most recent orders if not called
+func THWithStart(start int) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		payload.Add("start", fmt.Sprintf("%v", start))
+	}
+}
+
+// Ending unix timestamp or order tx ID of results (exclusive). If an order's
+// tx ID is given for start or end time, the order's opening time (opentm) is used
+// Defaults to show most recent orders if not called
+func THWithEnd(end int) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		payload.Add("end", fmt.Sprintf("%v", end))
+	}
+}
+
+// Result offset for pagination. Defaults to no offset if not called
+func THWithOffset(offset int) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		payload.Add("ofs", fmt.Sprintf("%v", offset))
+	}
+}
+
+// Whether or not to consolidate trades by individual taker trades. Defaults to
+// true if not called
+func THWithConsolidateTaker(consolidateTaker bool) GetTradesHistoryOptions {
+	return func(payload url.Values) {
+		payload.Add("consolidate_taker", fmt.Sprintf("%v", consolidateTaker))
+	}
+}

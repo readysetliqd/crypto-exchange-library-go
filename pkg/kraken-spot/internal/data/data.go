@@ -436,4 +436,33 @@ type OrderDescription struct {
 	CloseDescription string `json:"close"`
 }
 
+type TradesHistoryResp struct {
+	Trades map[string]TradeInfo `json:"trades"`
+}
+
+type TradeInfo struct {
+	OrderTxID           string   `json:"ordertxid"`
+	PositionTxID        string   `json:"postxid"`
+	Pair                string   `json:"pair"`
+	Time                float64  `json:"time"`
+	Side                string   `json:"type"`
+	OrderType           string   `json:"ordertype"`
+	AvgPrice            string   `json:"price"`
+	QuoteCost           string   `json:"cost"`
+	QuoteFee            string   `json:"fee"`
+	Volume              string   `json:"vol"`
+	InitialMargin       string   `json:"margin"`
+	Leverage            string   `json:"leverage"`
+	Misc                string   `json:"misc"`
+	TradeID             int      `json:"trade_id"`
+	PositionStatus      string   `json:"posstatus"`
+	PortionClosedPrice  string   `json:"cprice"`
+	PortionClosedCost   string   `json:"ccost"`
+	PortionClosedFee    string   `json:"cfee"`
+	PortionClosedVolume string   `json:"cvol"`
+	PortionMarginFreed  string   `json:"cmargin"`
+	PortionClosedPnL    string   `json:"net"`
+	Trades              []string `json:"trades"`
+}
+
 // #endregion
