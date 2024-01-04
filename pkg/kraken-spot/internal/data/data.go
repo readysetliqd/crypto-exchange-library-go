@@ -465,4 +465,57 @@ type TradeInfo struct {
 	Trades              []string `json:"trades"`
 }
 
+type OpenPosition struct {
+	OrderTxID      string  `json:"ordertxid"`
+	PositionStatus string  `json:"posstatus"`
+	Pair           string  `json:"pair"`
+	Time           float64 `json:"time"`
+	Side           string  `json:"type"`
+	OrderType      string  `json:"ordertype"`
+	QuoteCost      string  `json:"cost"`
+	QuoteFee       string  `json:"fee"`
+	Size           string  `json:"vol"`
+	VolumeClosed   string  `json:"vol_closed"`
+	InitialMargin  string  `json:"margin"`
+	CurrentValue   string  `json:"value"`
+	UPnL           string  `json:"net"`
+	Terms          string  `json:"terms"`
+	RolloverTime   string  `json:"rollovertm"`
+	Misc           string  `json:"misc"`
+	OrderFlags     string  `json:"oflags"`
+}
+
+type LedgersInfoResp struct {
+	Ledgers map[string]Ledger `json:"ledger"`
+	Count   int               `json:"count"`
+}
+
+type Ledger struct {
+	RefID      string  `json:"refid"`
+	Time       float64 `json:"time"`
+	Type       string  `json:"type"`
+	SubType    string  `json:"subtype"`
+	AssetClass string  `json:"aclass"`
+	Asset      string  `json:"asset"`
+	TxAmount   string  `json:"amount"`
+	TxFee      string  `json:"fee"`
+	EndBalance string  `json:"balance"`
+}
+
+type TradeVolume struct {
+	Currency      string         `json:"currency"`
+	CurrentVolume string         `json:"volume"`
+	Fees          map[string]Fee `json:"fees"`
+	MakerFees     map[string]Fee `json:"fees_maker"`
+}
+
+type Fee struct {
+	Fee        string `json:"fee"`
+	MinFee     string `json:"min_fee"`
+	MaxFee     string `json:"max_fee"`
+	NextFee    string `json:"next_fee"`
+	TierVolume string `json:"tier_volume"`
+	NextVolume string `json:"next_volume"`
+}
+
 // #endregion
