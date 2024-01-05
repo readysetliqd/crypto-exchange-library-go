@@ -518,4 +518,29 @@ type Fee struct {
 	NextVolume string `json:"next_volume"`
 }
 
+type RequestExportReportResp struct {
+	ID string `json:"id"`
+}
+
+type ExportReportStatus struct {
+	ID            string `json:"id"`
+	Description   string `json:"descr"`
+	Format        string `json:"format"`
+	Report        string `json:"report"`
+	SubType       string `json:"subtype"`
+	Status        string `json:"status"`
+	Fields        string `json:"fields"`
+	CreatedTime   string `json:"createdtm"`
+	StartTime     string `json:"starttm"`
+	CompletedTime string `json:"completedtm"`
+	DataStartTime string `json:"datastarttm"`
+	DataEndTime   string `json:"dataendtm"`
+	Asset         string `json:"asset"`
+}
+
+type DeleteReportResp struct {
+	Delete bool `json:"delete"`
+	Cancel bool `json:"cancel"`
+}
+
 // #endregion

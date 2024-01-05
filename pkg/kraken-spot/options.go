@@ -315,3 +315,94 @@ func TVWithPair(pair string) GetTradeVolumeOption {
 		payload.Add("pair", pair)
 	}
 }
+
+type RequestTradesExportReportOption func(payload url.Values)
+
+// File format to export. Defaults to "CSV" if not called or invalid value
+// passed to arg 'format'
+//
+// Enum: "CSV", "TSV"
+func RTWithFormat(format string) RequestTradesExportReportOption {
+	return func(payload url.Values) {
+		validFormat := map[string]bool{
+			"CSV": true,
+			"TSV": true,
+		}
+		if validFormat[format] {
+			payload.Add("format", format)
+		}
+	}
+}
+
+// Accepts comma-delimited list of fields passed as a single string to include
+// in report. Defaults to "all" if not called. API will return error:
+// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+// no validation checks for passed value to 'fields'
+//
+// Enum: "ordertxid", "time", "ordertype", "price", "cost", "fee", "vol",
+// "margin", "misc", "ledgers"
+func RTWithFields(fields string) RequestTradesExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("fields", fields)
+	}
+}
+
+// UNIX timestamp for report start time. Defaults to 1st of the current month
+// if not called
+func RTWithStart(start int) RequestTradesExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("start", fmt.Sprintf("%v", start))
+	}
+}
+
+// UNIX timestamp for report end time. Defaults to current time if not called
+func RTWithEnd(end int) RequestTradesExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("end", fmt.Sprintf("%v", end))
+	}
+}
+
+type RequestLedgersExportReportOption func(payload url.Values)
+
+// File format to export. Defaults to "CSV" if not called or invalid value
+// passed to arg 'format'
+//
+// Enum: "CSV", "TSV"
+func RLWithFormat(format string) RequestLedgersExportReportOption {
+	return func(payload url.Values) {
+		validFormat := map[string]bool{
+			"CSV": true,
+			"TSV": true,
+		}
+		if validFormat[format] {
+			payload.Add("format", format)
+		}
+	}
+}
+
+// Accepts comma-delimited list of fields passed as a single string to include
+// in report. Defaults to "all" if not called. API will return error:
+// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+// no validation checks for passed value to 'fields'
+//
+// Enum: "refid", "time", "type", "aclass", "asset", "amount", "fee", "balance"
+func RLWithFields(fields string) RequestLedgersExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("fields", fields)
+	}
+}
+
+// UNIX timestamp for report start time. Defaults to 1st of the current month
+// if not called
+func RLWithStart(start int) RequestLedgersExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("start", fmt.Sprintf("%v", start))
+	}
+}
+
+// UNIX timestamp for report end time. Defaults to current time if not called
+func RLWithEnd(end int) RequestLedgersExportReportOption {
+	return func(payload url.Values) {
+		payload.Add("end", fmt.Sprintf("%v", end))
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -622,7 +623,7 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 //
 // # Functional Options:
 //
-// // Filter output by asset or comma delimited list of assets Defaults to "all"
+// // Filter output by asset or comma delimited list of assets. Defaults to "all"
 // if not called.
 //
 //	func LIWithAsset(asset string) GetLedgersInfoOption
@@ -754,8 +755,6 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 //
 //	kc.GetTradeVolume(krakenspot.TVWithPair("XXBTZUSD,XETHZUSD"))
 func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.TradeVolume, error) {
-	// TODO write functional options
-	// TODO write doc comments;
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -781,65 +780,300 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 	return &tradeVolume, nil
 }
 
-// func (kc *KrakenClient) RequestExportReport() (, error) {
-// 	// TODO create data type if necessary
-//  // TODO fill in required args (if any) and options arg
-//  // TODO copy paste implementation;
-//  // TODO payload.Add any required args if applicable
-//  // TODO change hardcoded endpoint string in kc.doRequest()
-//  // TODO change returnVariable name and data type
-//  // TODO update new returnVariable in call to processPrivateApiResponse
-// 	// TODO change return statement
-//  // TODO create unique functional option type for arg
-//  // TODO write functional options
-//  // TODO write doc comments;
-// 	return nil, nil
-// }
+// Calls Kraken API private Account Data "AddExport" endpoint. Requests export
+// of trades data to file, defaults to CSV file type. Returns string containing
+// report ID or empty string if encountered error. Accepts functional options
+// args 'options'.
+//
+// Required Permissions: Orders and trades - Query open orders and trades;
+// Orders and trades - Query closed orders and trades; Data - Export data
+//
+// # Functional Options:
+//
+// // File format to export. Defaults to "CSV" if not called or invalid value
+// passed to arg 'format'
+//
+// // Enum: "CSV", "TSV"
+//
+//	func RTWithFormat(format string) RequestTradesExportReportOption
+//
+// // Accepts comma-delimited list of fields passed as a single string to include
+// in report. Defaults to "all" if not called. API will return error:
+// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+// no validation checks for passed value to 'fields'
+//
+// // Enum: "ordertxid", "time", "ordertype", "price", "cost", "fee", "vol",
+// "margin", "misc", "ledgers"
+//
+//	func RTWithFields(fields string) RequestTradesExportReportOption
+//
+// // UNIX timestamp for report start time. Defaults to 1st of the current month
+// if not called
+//
+//	func RTWithStart(start int) RequestTradesExportReportOption
+//
+// // UNIX timestamp for report end time. Defaults to current time if not called
+//
+//	func RTWithEnd(end int) RequestTradesExportReportOption
+//
+// # Example Usage:
+//
+//	reportID, err := kc.RequestTradesExportReport("January 2021 Trades", krakenspot.RTWithStart(1609459200), krakenspot.RTWithEnd(1612137600), krakenspot.RTWithFields("time,type,asset,amount,balance"))
+func (kc *KrakenClient) RequestTradesExportReport(description string, options ...RequestTradesExportReportOption) (string, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("report", "trades")
+	payload.Add("description", description)
+	for _, option := range options {
+		option(payload)
+	}
 
-// func (kc *KrakenClient) GetExportReportStatus() (, error) {
-// 	// TODO create data type if necessary
-//  // TODO fill in required args (if any) and options arg
-//  // TODO copy paste implementation;
-//  // TODO payload.Add any required args if applicable
-//  // TODO change hardcoded endpoint string in kc.doRequest()
-//  // TODO change returnVariable name and data type
-//  // TODO update new returnVariable in call to processPrivateApiResponse
-// 	// TODO change return statement
-//  // TODO create unique functional option type for arg
-//  // TODO write functional options
-//  // TODO write doc comments;
-// 	return nil, nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"AddExport", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return "", err
+	}
+	defer res.Body.Close()
 
-// func (kc *KrakenClient) RetrieveDataExport() (, error) {
-// 	// TODO create data type if necessary
-//  // TODO fill in required args (if any) and options arg
-//  // TODO copy paste implementation;
-//  // TODO payload.Add any required args if applicable
-//  // TODO change hardcoded endpoint string in kc.doRequest()
-//  // TODO change returnVariable name and data type
-//  // TODO update new returnVariable in call to processPrivateApiResponse
-// 	// TODO change return statement
-//  // TODO create unique functional option type for arg
-//  // TODO write functional options
-//  // TODO write doc comments;
-// 	return nil, nil
-// }
+	// Process API response
+	var exportResp data.RequestExportReportResp
+	err = processPrivateApiResponse(res, &exportResp)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "EGeneral:Internal error") {
+			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processPrivateApiResponse() | %w", err)
+			return "", err
+		} else {
+			err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+			return "", err
+		}
+	}
+	reportID := exportResp.ID
+	return reportID, nil
+}
 
-// func (kc *KrakenClient) DeleteExportReport() (, error) {
-// 	// TODO create data type if necessary
-//  // TODO fill in required args (if any) and options arg
-//  // TODO copy paste implementation;
-//  // TODO payload.Add any required args if applicable
-//  // TODO change hardcoded endpoint string in kc.doRequest()
-//  // TODO change returnVariable name and data type
-//  // TODO update new returnVariable in call to processPrivateApiResponse
-// 	// TODO change return statement
-//  // TODO create unique functional option type for arg
-//  // TODO write functional options
-//  // TODO write doc comments;
-// 	return nil, nil
-// }
+// Calls Kraken API private Account Data "AddExport" endpoint. Requests export
+// of ledgers data to file, defaults to CSV file type. Returns string containing
+// report ID or empty string if encountered error. Accepts functional options
+// args 'options'.
+//
+// Required Permissions: Data - Query ledger entries; Data - Export data
+//
+// # Functional Options:
+//
+// // File format to export. Defaults to "CSV" if not called or invalid value
+// passed to arg 'format'
+//
+// // Enum: "CSV", "TSV"
+//
+//	func RLWithFormat(format string) RequestLedgersExportReportOption
+//
+// // Accepts comma-delimited list of fields passed as a single string to include
+// in report. Defaults to "all" if not called. API will return error:
+// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+// no validation checks for passed value to 'fields'
+//
+// // Enum: "refid", "time", "type", "aclass", "asset",
+// "amount", "fee", "balance"
+//
+//	func RLWithFields(fields string) RequestLedgersExportReportOption
+//
+// // UNIX timestamp for report start time. Defaults to 1st of the current month
+// if not called
+//
+//	func RLWithStart(start int) RequestLedgersExportReportOption
+//
+// // UNIX timestamp for report end time. Defaults to current time if not called
+//
+//	func RLWithEnd(end int) RequestLedgersExportReportOption
+//
+// # Example Usage:
+//
+//	reportID, err := kc.RequestLedgersExportReport("January 2021 Ledgers", krakenspot.RLWithStart(1609459200), krakenspot.RLWithEnd(1612137600), krakenspot.RLWithFields("time,type,asset,amount,balance"))
+func (kc *KrakenClient) RequestLedgersExportReport(description string, options ...RequestLedgersExportReportOption) (string, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("report", "ledgers")
+	payload.Add("description", description)
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"AddExport", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return "", err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var exportResp data.RequestExportReportResp
+	err = processPrivateApiResponse(res, &exportResp)
+	if err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "EGeneral:Internal error") {
+			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processPrivateApiResponse() | %w", err)
+			return "", err
+		} else {
+			err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+			return "", err
+		}
+	}
+	reportID := exportResp.ID
+	return reportID, nil
+}
+
+// Calls Kraken API private Account Data "ExportStatus" endpoint. Gets status of
+// requested data exports. Requires arg 'reportType' of either "trades" or
+// "ledgers".
+//
+// Note: Kraken API requires valid 'reportType' to be passed. According to Kraken
+// API docs, this will filter results and only get status for reports of type
+// 'reportType'. As of 1/5/2024, this parameter does nothing and the output is
+// identical, yet a valid value is still required.
+//
+// Enum - 'reportType': "trades", "ledgers"
+//
+// Required Permissions: Data - Export data
+//
+// # Example Usage:
+//
+//	reportStatus, err := kc.GetExportReportStatus("ledgers")
+func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.ExportReportStatus, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	validReportType := map[string]bool{
+		"trades":  true,
+		"ledgers": true,
+	}
+	if !validReportType[reportType] {
+		err := fmt.Errorf("invalid value passed to arg 'reportType'")
+		return nil, err
+	}
+	payload.Add("report", reportType)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"ExportStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var exportReports []data.ExportReportStatus
+	err = processPrivateApiResponse(res, &exportReports)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &exportReports, nil
+}
+
+// Calls Kraken API private Account Data "RetrieveExport" endpoint. Retrieves a
+// specified processed data export with the ID passed to arg 'reportID' and
+// creates a  file with the output. Accepts optional arg 'path' as the full
+// desired path name. Defaults to creating .zip file in current directory if no
+// path is entered.
+//
+// Required Permissions: Data - Export data
+//
+// # Example Usage:
+//
+//	err := kc.RetrieveDataExport("TCJA", "C:/Users/User/Downloads/Reports/my-report.zip")
+func (kc *KrakenClient) RetrieveDataExport(reportID string, path ...string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("id", reportID)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"RetrieveExport", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Determine filePath from 'path' arg or default
+	var filePath string
+	if len(path) > 0 {
+		if len(path) > 1 {
+			err = fmt.Errorf("too many arguments passed, expected 1 or 2 including 'reportID' and optional 'path'")
+			return err
+		}
+		filePath = path[0]
+	} else {
+		filePath = "report_" + reportID + ".zip"
+	}
+	// Create .zip file and copy report to it
+	out, err := os.Create(filePath)
+	if err != nil {
+		err = fmt.Errorf("error creating .zip file for report | %w", err)
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, res.Body)
+	if err != nil {
+		err = fmt.Errorf("error copying output to .zip file | %w", err)
+		return err
+	}
+	return nil
+}
+
+// Calls Kraken API private Account Data "RemoveExport" endpoint. Deletes/cancels
+// exported trades/ledgers report with specific ID passed to arg 'reportID'.
+// Passing "delete" to arg 'requestType' can only be used for reports that have
+// already been processed; pass "cancel" for queued or processing reports.
+//
+// Enum - 'requestType': "delete", "cancel"
+//
+// Required Permissions: Data - Export data
+//
+// # Example Usage:
+//
+//	err := kc.RetrieveDataExport("TCJA", "cancel")
+func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("id", reportID)
+	validRequestType := map[string]bool{
+		"cancel": true,
+		"delete": true,
+	}
+	if !validRequestType[requestType] {
+		err := fmt.Errorf("invalid value passed to arg 'requestType'")
+		return err
+	}
+	payload.Add("type", requestType)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"RemoveExport", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var deleteResp data.DeleteReportResp
+	err = processPrivateApiResponse(res, &deleteResp)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return err
+	}
+	if !deleteResp.Delete && !deleteResp.Cancel {
+		err = fmt.Errorf("something went wrong completing request, verify status of report and try again")
+		return err
+	}
+	return nil
+}
 
 // #endregion
 
