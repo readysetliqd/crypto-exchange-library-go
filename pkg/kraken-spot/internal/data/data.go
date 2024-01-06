@@ -268,7 +268,7 @@ type Trade struct {
 	Price     string
 	Volume    string
 	Time      float64
-	Side      string
+	Direction string
 	OrderType string
 	Misc      string
 }
@@ -305,7 +305,7 @@ func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 					Price:     tradeInfo[0].(string),
 					Volume:    tradeInfo[1].(string),
 					Time:      tradeInfo[2].(float64),
-					Side:      tradeInfo[3].(string),
+					Direction: tradeInfo[3].(string),
 					OrderType: tradeInfo[4].(string),
 					Misc:      tradeInfo[5].(string),
 				}
@@ -427,7 +427,7 @@ type Order struct {
 
 type OrderDescription struct {
 	Pair             string `json:"pair"`
-	Side             string `json:"type"`
+	Direction        string `json:"type"`
 	OrderType        string `json:"ordertype"`
 	Price            string `json:"price"`  // Limit price for limit orders. Trigger price for stop-loss, stop-loss-limit, take-profit, take-profit-limit, trailing-stop, and trailing-stop-limit orders
 	Price2           string `json:"price2"` // Secondary limit price for stop-loss-limit, take-profit-limit, and trailing-stop-limit orders
@@ -445,7 +445,7 @@ type TradeInfo struct {
 	PositionTxID        string   `json:"postxid"`
 	Pair                string   `json:"pair"`
 	Time                float64  `json:"time"`
-	Side                string   `json:"type"`
+	Direction           string   `json:"type"`
 	OrderType           string   `json:"ordertype"`
 	AvgPrice            string   `json:"price"`
 	QuoteCost           string   `json:"cost"`
@@ -470,7 +470,7 @@ type OpenPosition struct {
 	PositionStatus string  `json:"posstatus"`
 	Pair           string  `json:"pair"`
 	Time           float64 `json:"time"`
-	Side           string  `json:"type"`
+	Direction      string  `json:"type"`
 	OrderType      string  `json:"ordertype"`
 	QuoteCost      string  `json:"cost"`
 	QuoteFee       string  `json:"fee"`
@@ -483,6 +483,20 @@ type OpenPosition struct {
 	RolloverTime   string  `json:"rollovertm"`
 	Misc           string  `json:"misc"`
 	OrderFlags     string  `json:"oflags"`
+}
+
+type OpenPositionConsolidated struct {
+	Pair          string `json:"pair"`
+	Direction     string `json:"type"`
+	Size          string `json:"vol"`
+	VolumeClosed  string `json:"vol_closed"`
+	QuoteCost     string `json:"cost"`
+	QuoteFee      string `json:"fee"`
+	Leverage      string `json:"leverage"`
+	InitialMargin string `json:"margin"`
+	UPnL          string `json:"net"`
+	NumPositions  string `json:"positions"`
+	CurrentValue  string `json:"value"`
 }
 
 type LedgersInfoResp struct {

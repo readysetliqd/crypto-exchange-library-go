@@ -207,12 +207,20 @@ func OPWithDoCalcs(doCalcs bool) GetOpenPositionsOption {
 	}
 }
 
-// TODO
-// test this enum?
-// Consolidate positions by market/pair
-func OPWithConsolidation(consolidation string) GetOpenPositionsOption {
+type GetOpenPositionsConsolidatedOption func(payload url.Values)
+
+// Comma delimited list of txids to limit output to. Defaults to show all open
+// positions if not called
+func OPCWithTxID(txID string) GetOpenPositionsConsolidatedOption {
 	return func(payload url.Values) {
-		payload.Add("consolidation", fmt.Sprintf("%v", consolidation))
+		payload.Add("txid", txID)
+	}
+}
+
+// Whether to include P&L calculations. Defaults to false if not called
+func OPCWithDoCalcs(doCalcs bool) GetOpenPositionsConsolidatedOption {
+	return func(payload url.Values) {
+		payload.Add("docalcs", fmt.Sprintf("%v", doCalcs))
 	}
 }
 

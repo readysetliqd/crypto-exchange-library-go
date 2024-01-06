@@ -566,16 +566,12 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 	return &tradeInfo, nil
 }
 
-// TODO write docstring
-// TODO test function works by opening a margin position
-// TODO test enum for OPWithConsolidation and update docstring here and options.go
-// TODO write example implmentation to docstring
 // Calls Kraken API private Account Data "OpenPositions" endpoint. Gets information
 // about open margin positions. Accepts functional options args 'options'.
 //
 // Required Permissions: Order and Trades - Query open orders & trades
 //
-// Functional Options:
+// # Functional Options:
 //
 // // Comma delimited list of txids to limit output to. Defaults to show all open
 // positions if not called
@@ -586,9 +582,9 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 //
 //	func OPWithDoCalcs(doCalcs bool) GetOpenPositionsOption
 //
-// // Consolidate positions by market/pair
+// # Example Usage:
 //
-//	func OPWithConsolidation(consolidation string) GetOpenPositionsOption
+//	positions, err := kc.GetOpenPositions(krakenspot.OPWithDoCalcs(true))
 func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*map[string]data.OpenPosition, error) {
 	// Build payload
 	payload := url.Values{}
@@ -607,6 +603,53 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 
 	// Process API response
 	var openPositions map[string]data.OpenPosition
+	err = processPrivateApiResponse(res, &openPositions)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &openPositions, nil
+}
+
+// Calls Kraken API private Account Data "OpenPositions" endpoint. Gets information
+// about open margin positions consolidated by market/pair. Accepts functional
+// options args 'options'.
+//
+// Required Permissions: Order and Trades - Query open orders & trades
+//
+// # Functional Options:
+//
+// // Comma delimited list of txids to limit output to. Defaults to show all open
+// positions if not called
+//
+//	func OPCWithTxID(txID string) GetOpenPositionsOption
+//
+// // Whether to include P&L calculations. Defaults to false if not called
+//
+//	func OPCWithDoCalcs(doCalcs bool) GetOpenPositionsOption
+//
+// # Example Usage:
+//
+//	positions, err := kc.GetOpenPositionsConsolidated(krakenspot.OPWithDoCalcs(true))
+func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositionsConsolidatedOption) (*[]data.OpenPositionConsolidated, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("consolidation", "market")
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"OpenPositions", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var openPositions []data.OpenPositionConsolidated
 	err = processPrivateApiResponse(res, &openPositions)
 	if err != nil {
 		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
