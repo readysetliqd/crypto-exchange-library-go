@@ -558,3 +558,28 @@ type DeleteReportResp struct {
 }
 
 // #endregion
+
+// #region Private Trading Data structs
+
+// #endregion
+
+// #region Private Funding Data structs
+
+// #endregion
+
+// #region Private Subaccounts Data structs
+
+// #endregion
+
+// #region Private Earn Data structs
+
+// #endregion
+
+// #region Private Websocket Authentication Data structs
+
+type WebSocketsToken struct {
+	Token   string `json:"token"`
+	Expires uint16 `json:"expires"`
+}
+
+// #endregion

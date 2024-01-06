@@ -1150,8 +1150,34 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // #region Websockets Authentication endpoint
 
-// TODO
-// fill in one websockets function
+// Calls Kraken API private Account Data "GetWebSocketsToken" endpoint. An
+// authentication token must be requested via this REST API endpoint in order
+// to connect to and authenticate with our Websockets API. The token should be
+// used within 15 minutes of creation, but it does not expire once a successful
+// Websockets connection and private subscription has been made and is maintained.
+//
+// Required Permissions: WebSockets interface - On
+//
+// # Example Usage:
+//
+//	tokenResp, err := kc.GetWebSocketsToken()
+//	token := (*tokenResp).Token
+func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	res, err := kc.doRequest(privatePrefix+"GetWebSocketsToken", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+	var token data.WebSocketsToken
+	err = processPrivateApiResponse(res, &token)
+	if err != nil {
+		return nil, err
+	}
+	return &token, nil
+}
 
 // #endregion
 
