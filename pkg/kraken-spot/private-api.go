@@ -1250,39 +1250,155 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // TODO finish implementation checklist
 // Calls Kraken API private Earn "Allocate" endpoint.
-// func (kc *KrakenClient) AllocateEarnFunds() (error) {
-// 	return nil
-// }
+func (kc *KrakenClient) AllocateEarnFunds() error {
+	return nil
+}
 
 // TODO finish implementation checklist
 // Calls Kraken API private Earn "Deallocate" endpoint.
-// func (kc *KrakenClient) DeallocateEarnFunds() (error) {
-// 	return nil
-// }
+func (kc *KrakenClient) DeallocateEarnFunds() error {
+	return nil
+}
 
 // TODO finish implementation checklist
 // Calls Kraken API private Earn "AllocateStatus" endpoint.
-// func (kc *KrakenClient) AllocationStatus() (bool, error) {
-// 	return nil
-// }
+func (kc *KrakenClient) AllocationStatus() (bool, error) {
+	return false, nil
+}
 
 // TODO finish implementation checklist
 // Calls Kraken API private Earn "DeallocateStatus" endpoint.
-// func (kc *KrakenClient) DeallocationStatus() (bool, error) {
-// 	return nil
-// }
+func (kc *KrakenClient) DeallocationStatus() (bool, error) {
+	return false, nil
+}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Earn "Strategies" endpoint.
-// func (kc *KrakenClient) GetEarnStrategies() (, error) {
-// 	return nil
-// }
+// Calls Kraken API private Earn "Strategies" endpoint. Returns earn strategies
+// along with their parameters. Returns only strategies that are available to
+// the user based on geographic region.
+//
+// Note: In practice, allocation_restriction_info will always be empty even when
+// can_allocate is false despite Kraken API docs note otherwise.
+//
+// Kraken API docs note: When the user does not meet the tier restriction,
+// can_allocate will be false and allocation_restriction_info indicates Tier as
+// the restriction reason. Earn products generally require Intermediate tier.
+// Get your account verified to access earn.
+//
+// Note: Paging isn't yet implemented, so the endpoint always returns all data
+// in the first page. This results in some functional options having no effect
+// on output though the query parameters are still valid.
+//
+// Required Permissions: None
+//
+// # Functional Options:
+//
+// // Filter strategies by asset name. Defaults to no filter if function not called
+//
+//	func ESWithAsset(asset string) GetEarnStrategiesOption
+//
+// // Filters displayed strategies by lock type. Accepts array of strings for arg
+// 'lockTypes' and ignores invalid values passed. Defaults to no filter if
+// function not called or only invalid values passed.
+//
+// // Enum - 'lockTypes': "flex", "bonded", "timed", "instant"
+//
+//	func ESWithLockType(lockTypes []string) GetEarnStrategiesOption
+//
+// ~// Pass with arg 'ascending' set to true to sort strategies ascending. Defaults
+// to false (descending) if function is not called~
+//
+// ~func ESWithAscending(ascending bool) GetEarnStrategiesOption~
+//
+// ~// Sets page ID to display results. Defaults to beginning/end (depending on
+// sorting set by ESWithAscending()) if function not called.~
+//
+// ~func ESWithCursor(cursor string) GetEarnStrategiesOption~
+//
+// ~// Sets number of items to return per page. Note that the limit may be cap'd to
+// lower value in the application code.~
+//
+// ~func ESWithLimit(limit uint16) GetEarnStrategiesOption~
+//
+// # Example Usage:
+//
+//	strategies, err := kc.GetEarnStrategies(krakenspot.ESWithLockType([]string{"flex", "instant"}))
+func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*data.EarnStrategiesResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Earn "Allocations" endpoint.
-// func (kc *KrakenClient) GetEarnAllocations() (, error) {
-// 	return nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/Strategies", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var strategies data.EarnStrategiesResp
+	err = processPrivateApiResponse(res, &strategies)
+	if err != nil {
+		return nil, err
+	}
+	return &strategies, nil
+}
+
+// Calls Kraken API private Earn "Allocations" endpoint. Gets all earn allocations
+// for the user. By default all allocations are returned, even for strategies
+// that have been used in the past and have zero balance now.
+//
+// Note: Paging hasn't been implemented for this method
+//
+// Required Permissions: Funds permissions - Query
+//
+// # Functional Options:
+//
+// // Pass with arg 'ascending' set to true to sort strategies ascending. Defaults
+// to false (descending) if function is not called
+//
+//	func EAWithAscending(ascending bool) GetEarnAllocationsOption
+//
+// // A secondary currency to express the value of your allocations. Defaults
+// to express value in USD if function is not called
+//
+//	func EAWithConvertedAsset(asset string) GetEarnAllocationsOption
+//
+// // Omit entries for strategies that were used in the past but now they don't
+// hold any allocation. Defaults to false (don't omit) if function is not called
+//
+//	func EAWithHideZeroAllocations(hide bool) GetEarnAllocationsOption
+//
+// # Example Usage:
+//
+//	allocations, err := kc.GetEarnAllocations(krakenspot.EAWithConvertedAsset("XBT"), krakenspot.EAWithHideZeroAllocations())
+func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) (*data.EarnAllocationsResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/Allocations", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var allocations data.EarnAllocationsResp
+	err = processPrivateApiResponse(res, &allocations)
+	if err != nil {
+		return nil, err
+	}
+	return &allocations, nil
+}
 
 // #endregion
 
@@ -1301,14 +1417,19 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 //	tokenResp, err := kc.GetWebSocketsToken()
 //	token := (*tokenResp).Token
 func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
+	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request to server
 	res, err := kc.doRequest(privatePrefix+"GetWebSocketsToken", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
 		return nil, err
 	}
 	defer res.Body.Close()
+
+	// Process API response
 	var token data.WebSocketsToken
 	err = processPrivateApiResponse(res, &token)
 	if err != nil {

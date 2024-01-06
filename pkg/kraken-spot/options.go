@@ -5,6 +5,7 @@ import (
 	"net/url"
 )
 
+// #region Private Account Data endpoints functional options
 // For *KrakenClient method GetOpenOrders()
 type GetOpenOrdersOption func(payload url.Values)
 
@@ -414,3 +415,95 @@ func RLWithEnd(end int) RequestLedgersExportReportOption {
 		payload.Add("end", fmt.Sprintf("%v", end))
 	}
 }
+
+// #endregion
+
+// #region Private Trading endpoints functional options
+// #endregion
+
+// #region Private Funding endpoints functional options
+// #endregion
+
+// #region Private Earn endpoints functional options
+
+type GetEarnStrategiesOption func(payload url.Values)
+
+// Sorts strategies by ascending. Defaults to false (descending) if function is
+// not called
+func ESWithAscending() GetEarnStrategiesOption {
+	return func(payload url.Values) {
+		payload.Add("ascending", "true")
+	}
+}
+
+// Filter strategies by asset name. Defaults to no filter if function not called
+func ESWithAsset(asset string) GetEarnStrategiesOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Sets page ID to display results. Defaults to beginning/end (depending on
+// sorting set by ESWithAscending()) if function not called.
+func ESWithCursor(cursor string) GetEarnStrategiesOption {
+	return func(payload url.Values) {
+		payload.Add("cursor", cursor)
+	}
+}
+
+// Sets number of items to return per page. Note that the limit may be cap'd to
+// lower value in the application code.
+func ESWithLimit(limit uint16) GetEarnStrategiesOption {
+	return func(payload url.Values) {
+		payload.Add("limit", fmt.Sprintf("%v", limit))
+	}
+}
+
+// Filters displayed strategies by lock type. Accepts array of strings for arg
+// 'lockTypes' and ignores invalid values passed. Defaults to no filter if
+// function not called or only invalid values passed.
+//
+// Enum - 'lockTypes': "flex", "bonded", "timed", "instant"
+func ESWithLockType(lockTypes []string) GetEarnStrategiesOption {
+	return func(payload url.Values) {
+		validLockTypes := map[string]bool{
+			"flex":    true,
+			"bonded":  true,
+			"timed":   true,
+			"instant": true,
+		}
+		for _, lockType := range lockTypes {
+			if validLockTypes[lockType] {
+				payload.Add("lock_type[]", lockType)
+			}
+		}
+	}
+}
+
+type GetEarnAllocationsOption func(payload url.Values)
+
+// Sorts strategies by ascending. Defaults to false (descending) if function is
+// not called
+func EAWithAscending() GetEarnAllocationsOption {
+	return func(payload url.Values) {
+		payload.Add("ascending", "true")
+	}
+}
+
+// A secondary currency to express the value of your allocations. Defaults
+// to express value in USD if function is not called
+func EAWithConvertedAsset(asset string) GetEarnAllocationsOption {
+	return func(payload url.Values) {
+		payload.Add("converted_asset", asset)
+	}
+}
+
+// Omit entries for strategies that were used in the past but now they don't
+// hold any allocation. Defaults to false (don't omit) if function is not called
+func EAWithHideZeroAllocations() GetEarnAllocationsOption {
+	return func(payload url.Values) {
+		payload.Add("hide_zero_allocations", "true")
+	}
+}
+
+// #endregion

@@ -573,6 +573,102 @@ type DeleteReportResp struct {
 
 // #region Private Earn Data structs
 
+type EarnStrategiesResp struct {
+	Strategies []EarnStrategy `json:"items"`
+	NextCursor string         `json:"next_cursor"`
+}
+
+type EarnStrategy struct {
+	Asset             string       `json:"asset"`
+	AllocationFee     interface{}  `json:"allocation_fee"`
+	RestrictionInfo   []string     `json:"allocation_restriction_info"`
+	APREstimate       APREstimate  `json:"apr_estimate"`
+	AutoCompound      AutoCompound `json:"auto_compound"`
+	CanAllocate       bool         `json:"can_allocate"`
+	CanDeallocate     bool         `json:"can_deallocate"`
+	DeallocationFee   interface{}  `json:"deallocation_fee"`
+	ID                string       `json:"id"`
+	LockType          LockType     `json:"lock_type"`
+	UserCap           string       `json:"user_cap"`
+	UserMinAllocation string       `json:"user_min_allocation"`
+	YieldSource       YieldSource  `json:"yield_source"`
+}
+
+type APREstimate struct {
+	High string `json:"high"`
+	Low  string `json:"low"`
+}
+
+type AutoCompound struct {
+	Default bool   `json:"default"`
+	Type    string `json:"type"`
+}
+
+type LockType struct {
+	Type                    string `json:"type"`
+	PayoutFrequency         int    `json:"payout_frequency"`
+	BondingPeriod           int    `json:"bonding_period"`
+	BondingPeriodVariable   bool   `json:"bonding_period_variable"`
+	BondingRewards          bool   `json:"bonding_rewards"`
+	ExitQueuePeriod         int    `json:"exit_queue_period"`
+	UnbondingPeriod         int    `json:"unbonding_period"`
+	UnbondingPeriodVariable bool   `json:"unbonding_period_variable"`
+	UnbondingRewards        bool   `json:"unbonding_rewards"`
+}
+
+type YieldSource struct {
+	Type string `json:"type"`
+}
+
+type EarnAllocationsResp struct {
+	ConvertedAsset string           `json:"converted_asset"`
+	Allocations    []EarnAllocation `json:"items"`
+	TotalAllocated string           `json:"total_allocated"`
+	TotalRewarded  string           `json:"total_rewarded"`
+}
+
+type EarnAllocation struct {
+	AmountAllocated EarnAlloAmount `json:"amount_allocated"`
+	NativeAsset     string         `json:"native_asset"`
+	Payout          EarnAlloPayout `json:"payout"`
+	StrategyID      string         `json:"strategy_id"`
+	TotalReward     EarnAlloReward `json:"total_rewarded"`
+}
+
+type EarnAlloAmount struct {
+	Bonding   AmountAllocated `json:"bonding"`
+	ExitQueue AmountAllocated `json:"exit_queue"`
+	Pending   AmountAllocated `json:"pending"`
+	Total     AmountAllocated `json:"total"`
+	Unbonding AmountAllocated `json:"unbonding"`
+}
+
+type AmountAllocated struct {
+	AllocationCount uint         `json:"allocation_count"`
+	Allocations     []Allocation `json:"allocations"`
+	ConvertedAmount string       `json:"converted"`
+	NativeAmount    string       `json:"native"`
+}
+
+type Allocation struct {
+	Converted    string `json:"converted"`
+	TimeCreated  string `json:"created_at"`
+	TimeExpires  string `json:"expires"`
+	NativeAmount string `json:"native"`
+}
+
+type EarnAlloPayout struct {
+	AccumulatedReward EarnAlloReward `json:"accumulated_reward"`
+	EstimatedReward   EarnAlloReward `json:"estimated_reward"`
+	PeriodEnd         string         `json:"period_end"`
+	PeriodStart       string         `json:"period_start"`
+}
+
+type EarnAlloReward struct {
+	ConvertedAmount string `json:"converted"`
+	NativeAmount    string `json:"native"`
+}
+
 // #endregion
 
 // #region Private Websocket Authentication Data structs
