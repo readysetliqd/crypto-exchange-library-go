@@ -1122,29 +1122,167 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // #region Authenticated Trading endpoints
 
-// TODO
-// fill in trading endpoints
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "AddOrder" endpoint.
+// func (kc *KrakenClient) AddOrder() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "AddOrderBatch" endpoint.
+// func (kc *KrakenClient) AddOrderBatch() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "EditOrder" endpoint.
+// func (kc *KrakenClient) EditOrder() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "CancelOrder" endpoint.
+// func (kc *KrakenClient) CancelOrder() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "CancelAll" endpoint.
+// func (kc *KrakenClient) CancelAllOrders() (uint32, error) {
+// 	return 0, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "CancelAllOrdersAfter" endpoint.
+// func (kc *KrakenClient) CancelAllOrdersAfter() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Trading "CancelOrderBatch" endpoint.
+// func (kc *KrakenClient) CancelOrderBatch() (uint8, error) {
+// 	return 0, nil
+// }
 
 // #endregion
 
 // #region Authenticated Funding endpoints
 
-// TODO
-// fill in Funding endpoints
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "DepositMethods" endpoint.
+// func (kc *KrakenClient) GetDepositMethods() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "DepositAddresses" endpoint.
+// func (kc *KrakenClient) GetDepositAddresses() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "DepositStatus" endpoint.
+// func (kc *KrakenClient) GetDepositsStatus() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WithdrawMethods" endpoint.
+// func (kc *KrakenClient) GetWithdrawalMethods() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WithdrawAddresses" endpoint.
+// func (kc *KrakenClient) GetWithdrawalAddresses() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WithdrawInfo" endpoint.
+// func (kc *KrakenClient) GetWithdrawalInfo() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "Withdraw" endpoint.
+// func (kc *KrakenClient) WithdrawFunds() (string, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WithdrawStatus" endpoint.
+// func (kc *KrakenClient) GetWithdrawalsStatus() (, error) {
+// 	return nil, nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WithdrawCancel" endpoint.
+// func (kc *KrakenClient) CancelWithdrawal() (error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Funding "WalletTransfer" endpoint.
+// func (kc *KrakenClient) WalletTransfer() (string, error) {
+// 	return nil, nil
+// }
 
 // #endregion
 
 // #region Authenticated Subaccounts endpoints
 
-// TODO
-// fill in Subaccounts endpoints
+// TODO finish implementation checklist
+// Calls Kraken API private Subaccounts "CreateSubaccount" endpoint.
+// func (kc *KrakenClient) CreateSubaccount() (error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Subaccounts "AccountTransfer" endpoint.
+// func (kc *KrakenClient) AccountTransfer() (, error) {
+// 	return nil
+// }
 
 // #endregion
 
 // #region Authenticated Earn endpoints
 
-// TODO
-// fill in Earn endpoints
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "Allocate" endpoint.
+// func (kc *KrakenClient) AllocateEarnFunds() (error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "Deallocate" endpoint.
+// func (kc *KrakenClient) DeallocateEarnFunds() (error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "AllocateStatus" endpoint.
+// func (kc *KrakenClient) AllocationStatus() (bool, error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "DeallocateStatus" endpoint.
+// func (kc *KrakenClient) DeallocationStatus() (bool, error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "Strategies" endpoint.
+// func (kc *KrakenClient) GetEarnStrategies() (, error) {
+// 	return nil
+// }
+
+// TODO finish implementation checklist
+// Calls Kraken API private Earn "Allocations" endpoint.
+// func (kc *KrakenClient) GetEarnAllocations() (, error) {
+// 	return nil
+// }
 
 // #endregion
 
