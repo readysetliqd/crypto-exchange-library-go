@@ -105,7 +105,9 @@ func processPrivateApiResponse(res *http.Response, target interface{}) error {
 // Calls Kraken API private Account Data "Balance" endpoint. Returns map of all
 // "cash" (including coins) balances, net of pending withdrawals as strings
 //
-// Required Permissions: Funding Permissions - Query
+// # Required Permissions:
+//
+// Funding Permissions - Query;
 func (kc *KrakenClient) GetAccountBalances() (*map[string]string, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -126,7 +128,9 @@ func (kc *KrakenClient) GetAccountBalances() (*map[string]string, error) {
 // Calls Kraken API private Account Data "Balance" endpoint. Returns float of
 // total USD balance "ZUSD"
 //
-// Required Permissions: Funding Permissions - Query
+// # Required Permissions:
+//
+// Funding Permissions - Query;
 func (kc *KrakenClient) TotalUSDBalance() (float64, error) {
 	balances, err := kc.GetAccountBalances()
 	if err != nil {
@@ -142,7 +146,9 @@ func (kc *KrakenClient) TotalUSDBalance() (float64, error) {
 // Calls Kraken API private Account Data "BalanceEx" endpoint. Returns map of all
 // extended account balances, including credits and held amounts.
 //
-// Required Permissions: Funding Permissions - Query
+// # Required Permissions:
+//
+// Funding Permissions - Query;
 func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -165,7 +171,9 @@ func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance,
 // available account balances as float64. Balance available for trading is
 // calculated as: available balance = balance + credit - credit_used - hold_trade
 //
-// Required Permissions: Funding Permissions - Query
+// # Required Permissions:
+//
+// Funding Permissions - Query;
 func (kc *KrakenClient) GetAvailableBalances() (*map[string]float64, error) {
 	balances, err := kc.GetExtendedBalances()
 	if err != nil {
@@ -216,7 +224,9 @@ func (kc *KrakenClient) GetAvailableBalances() (*map[string]float64, error) {
 // USD (ZUSD) account balance as float64. Balance available for trading is
 // calculated as: available balance = balance + credit - credit_used - hold_trade
 //
-// Required Permissions: Funding Permissions - Query
+// # Required Permissions:
+//
+// Funding Permissions - Query;
 func (kc *KrakenClient) AvailableUSDBalance() (float64, error) {
 	balances, err := kc.GetExtendedBalances()
 	if err != nil {
@@ -252,8 +262,10 @@ func (kc *KrakenClient) AvailableUSDBalance() (float64, error) {
 // denominated in arg 'asset'. Passing no arg to 'asset' defaults to USD (ZUSD)
 // denomination.
 //
-// Required Permissions: Funding Permissions - Query; Order and Trades - Query
-// open orders & trades
+// # Required Permissions:
+//
+// Funding Permissions - Query;
+// Order and Trades - Query open orders & trades
 func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -283,7 +295,9 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 // information for all currently open orders. Accepts functional options args
 // 'options'.
 //
-// Required Permissions: Order and Trades - Query open orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
 //
 // # Functional Options:
 //
@@ -330,7 +344,9 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 // information for most recent closed orders. Accepts functional options args
 // 'options'.
 //
-// Required Permissions: Order and Trades - Query closed orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query closed orders & trades;
 //
 // # Functional Options:
 //
@@ -406,7 +422,9 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 // Accepts multiple orders with transaction IDs passed as a single comma delimited
 // string with no white-space (50 maximum). Accepts functional options args 'options'.
 //
-// Required Permissions: Order and Trades - Query closed orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query closed orders & trades;
 //
 // # Functional Options:
 //
@@ -459,7 +477,9 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 // information about trades/fills. 50 results are returned at a time, the most
 // recent by default.
 //
-// Required Permissions: Order and Trades - Query closed orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query closed orders & trades;
 //
 // # Functional Options:
 //
@@ -529,7 +549,9 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 // Accepts multiple trades with transaction IDs passed as a single comma delimited
 // string with no white-space (20 maximum). Accepts functional options args 'options'.
 //
-// Required Permissions: Order and Trades - Query closed orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query closed orders & trades;
 //
 // # Functional Options:
 //
@@ -571,7 +593,9 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 // Calls Kraken API private Account Data "OpenPositions" endpoint. Gets information
 // about open margin positions. Accepts functional options args 'options'.
 //
-// Required Permissions: Order and Trades - Query open orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
 //
 // # Functional Options:
 //
@@ -617,7 +641,9 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 // about open margin positions consolidated by market/pair. Accepts functional
 // options args 'options'.
 //
-// Required Permissions: Order and Trades - Query open orders & trades
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
 //
 // # Functional Options:
 //
@@ -664,7 +690,9 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 // about ledger entries. 50 results are returned at a time, the most recent by
 // default. Accepts functional options args 'options'.
 //
-// Required Permissions: Data - Query ledger entries
+// # Required Permissions:
+//
+// Data - Query ledger entries;
 //
 // # Functional Options:
 //
@@ -741,8 +769,9 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 // multiple ledgers with ledger IDs passed as a single comma delimited string
 // with no white-space (20 maximum). Accepts functional options args 'options'.
 //
-// Required Permissions:
-// Data - Query ledger entries
+// # Required Permissions:
+//
+// Data - Query ledger entries;
 //
 // # Functional Options:
 //
@@ -787,7 +816,9 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 // given in fees and maker side in fees_maker. For pairs not on maker/taker, they
 // will only be given in fees. Accepts functional options args 'options'.
 //
-// Required Permissions: Funds permissions - Query
+// # Required Permissions:
+//
+// Funds permissions - Query;
 //
 // # Functional Options:
 //
@@ -830,8 +861,11 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 // report ID or empty string if encountered error. Accepts functional options
 // args 'options'.
 //
-// Required Permissions: Orders and trades - Query open orders and trades;
-// Orders and trades - Query closed orders and trades; Data - Export data
+// # Required Permissions:
+//
+// Orders and trades - Query open orders and trades;
+// Orders and trades - Query closed orders and trades;
+// Data - Export data;
 //
 // # Functional Options:
 //
@@ -904,7 +938,10 @@ func (kc *KrakenClient) RequestTradesExportReport(description string, options ..
 // report ID or empty string if encountered error. Accepts functional options
 // args 'options'.
 //
-// Required Permissions: Data - Query ledger entries; Data - Export data
+// # Required Permissions:
+//
+// Data - Query ledger entries;
+// Data - Export data;
 //
 // # Functional Options:
 //
@@ -983,7 +1020,9 @@ func (kc *KrakenClient) RequestLedgersExportReport(description string, options .
 //
 // Enum - 'reportType': "trades", "ledgers"
 //
-// Required Permissions: Data - Export data
+// # Required Permissions:
+//
+// Data - Export data;
 //
 // # Example Usage:
 //
@@ -1026,7 +1065,9 @@ func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.Export
 // desired path name. Defaults to creating .zip file in current directory if no
 // path is entered.
 //
-// Required Permissions: Data - Export data
+// # Required Permissions:
+//
+// Data - Export data;
 //
 // # Example Usage:
 //
@@ -1078,7 +1119,9 @@ func (kc *KrakenClient) RetrieveDataExport(reportID string, path ...string) erro
 //
 // Enum - 'requestType': "delete", "cancel"
 //
-// Required Permissions: Data - Export data
+// # Required Permissions:
+//
+// Data - Export data;
 //
 // # Example Usage:
 //
@@ -1176,7 +1219,8 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 //
 // # Required Permissions:
 //
-// Funds permissions - Query; Funds permissions - Deposit
+// Funds permissions - Query;
+// Funds permissions - Deposit;
 //
 // # ~Functional Options:~
 //
@@ -1463,7 +1507,8 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 //
 // # Required Permissions:
 //
-// Funds permissions - Query; Funds permissions - Withdraw
+// Funds permissions - Query;
+// Funds permissions - Withdraw;
 //
 // # Functional Options:
 //
@@ -1517,7 +1562,8 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 //
 // # Required Permissions:
 //
-// Funds permissions - Query; Funds permissions - Withdraw
+// Funds permissions - Query;
+// Funds permissions - Withdraw;
 //
 // # Functional Options:
 //
@@ -1578,7 +1624,8 @@ func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddresses
 //
 // # Required Permissions:
 //
-// Funds permissions - Query; Funds permissions - Withdraw
+// Funds permissions - Query;
+// Funds permissions - Withdraw;
 //
 // # Example Usage:
 //
@@ -1669,7 +1716,8 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 //
 // # Required Permissions:
 //
-// Funds permissions - Withdraw; OR Data - Query ledger entries
+// Funds permissions - Withdraw; OR
+// Data - Query ledger entries;
 //
 // # Functional Options:
 //
@@ -1732,7 +1780,8 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 //
 // # Required Permissions:
 //
-// Funds permissions - Withdraw; OR Data - Query ledger entries
+// Funds permissions - Withdraw; OR
+// Data - Query ledger entries;
 //
 // # Functional Options:
 //
@@ -1811,7 +1860,8 @@ func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsS
 //
 // # Required Permissions:
 //
-// Funds permissions - Withdraw; OR Data - Query ledger entries
+// Funds permissions - Withdraw; OR
+// Data - Query ledger entries;
 //
 // # Example Usage:
 //
@@ -1940,7 +1990,9 @@ func (kc *KrakenClient) TransferToFutures(asset string, amount string) (string, 
 // Note: Subaccounts are currently only available to institutional clients.
 // Please contact your Account Manager for more details.
 //
-// Required Permissions: Institutional verification
+// # Required Permissions:
+//
+// Institutional verification;
 //
 // # Example Usage:
 //
@@ -1982,7 +2034,9 @@ func (kc *KrakenClient) CreateSubaccount(username string, email string) error {
 // Note: Subaccounts are currently only available to institutional clients.
 // Please contact your Account Manager for more details.
 //
-// Required Permissions: Institutional verification
+// # Required Permissions:
+//
+// Institutional verification;
 //
 // # Example Usage:
 //
@@ -2030,7 +2084,9 @@ func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount
 // Note: There can be only one (de)allocation request in progress for given user
 // and strategy.
 //
-// Required permissions: Funds permissions - Earn
+// # Required permissions:
+//
+// Funds permissions - Earn;
 //
 // # Example Usage:
 //
@@ -2076,7 +2132,9 @@ func (kc *KrakenClient) AllocateEarnFunds(strategyID string, amount string) erro
 // Note: There can be only one (de)allocation request in progress for given user
 // and strategy.
 //
-// Required permissions: Funds permissions - Earn
+// # Required permissions:
+//
+// Funds permissions - Earn;
 //
 // # Example Usage:
 //
@@ -2116,7 +2174,10 @@ func (kc *KrakenClient) DeallocateEarnFunds(strategyID string, amount string) er
 // an api error if there was an issue with the request. API will also return false
 // with no errors for strategies on which the account has never made a request.
 //
-// Required Permissions: Funds permissions - Query OR Funds permissions - Earn
+// # Required Permissions:
+//
+// Funds permissions - Query; OR
+// Funds permissions - Earn;
 //
 // # Example Usage:
 //
@@ -2151,7 +2212,10 @@ func (kc *KrakenClient) AllocationStatus(strategyID string) (bool, error) {
 // an api error if there was an issue with the request. API will also return false
 // with no errors for strategies on which the account has never made a request.
 //
-// Required Permissions: Funds permissions - Query OR Funds permissions - Earn
+// # Required Permissions:
+//
+// Funds permissions - Query; OR
+// Funds permissions - Earn;
 //
 // # Example Usage:
 //
@@ -2196,7 +2260,9 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 // in the first page. This results in some functional options having no effect
 // on output though the query parameters are still valid.
 //
-// Required Permissions: None
+// # Required Permissions:
+//
+// None;
 //
 // # Functional Options:
 //
@@ -2262,7 +2328,9 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 //
 // Note: Paging hasn't been implemented for this method
 //
-// Required Permissions: Funds permissions - Query
+// # Required Permissions:
+//
+// Funds permissions - Query;
 //
 // # Functional Options:
 //
@@ -2320,7 +2388,9 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 // used within 15 minutes of creation, but it does not expire once a successful
 // Websockets connection and private subscription has been made and is maintained.
 //
-// Required Permissions: WebSockets interface - On
+// # Required Permissions:
+//
+// WebSockets interface - On;
 //
 // # Example Usage:
 //
