@@ -1170,65 +1170,765 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // #region Authenticated Funding endpoints
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "DepositMethods" endpoint.
-// func (kc *KrakenClient) GetDepositMethods() (, error) {
-// 	return nil, nil
-// }
+// Calls Kraken API private Funding "DepositMethods" endpoint. Retrieve methods
+// available for depositing a specified asset passed to arg 'asset'. ~Accepts
+// functional options args 'options'.~
+//
+// # Required Permissions:
+//
+// Funds permissions - Query; Funds permissions - Deposit
+//
+// # ~Functional Options:~
+//
+// ~Asset class being deposited (optional). Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency".~
+//
+// ~func DMWithAssetClass(aclass string) GetDepositMethodsOption~
+//
+// # Example Usage:
+//
+//	depositMethods, err := kc.GetDepositMethods("XBT")
+func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMethodsOption) (*[]data.DepositMethod, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	for _, option := range options {
+		option(payload)
+	}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "DepositAddresses" endpoint.
-// func (kc *KrakenClient) GetDepositAddresses() (, error) {
-// 	return nil, nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"DepositMethods", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "DepositStatus" endpoint.
-// func (kc *KrakenClient) GetDepositsStatus() (, error) {
-// 	return nil, nil
-// }
+	// Process API response
+	var depositMethods []data.DepositMethod
+	err = processPrivateApiResponse(res, &depositMethods)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &depositMethods, nil
+}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WithdrawMethods" endpoint.
-// func (kc *KrakenClient) GetWithdrawalMethods() (, error) {
-// 	return nil, nil
-// }
+// Calls Kraken API private Funding "DepositAddresses" endpoint. Retrieve (or
+// generate new with DAWithNew() passed to arg 'options') deposit addresses
+// for a particular asset and method. Accepts functional options args 'options'.
+//
+// # Required Permissions:
+//
+// Funds permissions - Query;
+//
+// # Functional Options:
+//
+// // Whether or not to generate a new address. Defaults to false if function is
+// not called.
+//
+//	func DAWithNew() GetDepositAddressesOption
+//
+// // Amount you wish to deposit (only required for method=Bitcoin Lightning)
+//
+//	func DAWithAmount(amount string) GetDepositAddressesOption
+//
+// # Example Usage:
+//
+//	depositAddresses, err := kc.GetDepositAddresses("XBT", "Bitcoin", krakenspot.DAWithNew())
+func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options ...GetDepositAddressesOption) (*[]data.DepositAddress, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("method", method)
+	for _, option := range options {
+		option(payload)
+	}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WithdrawAddresses" endpoint.
-// func (kc *KrakenClient) GetWithdrawalAddresses() (, error) {
-// 	return nil, nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"DepositAddresses", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WithdrawInfo" endpoint.
-// func (kc *KrakenClient) GetWithdrawalInfo() (, error) {
-// 	return nil, nil
-// }
+	// Process API response
+	var depositAddresses []data.DepositAddress
+	err = processPrivateApiResponse(res, &depositAddresses)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &depositAddresses, nil
+}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "Withdraw" endpoint.
-// func (kc *KrakenClient) WithdrawFunds() (string, error) {
-// 	return nil, nil
-// }
+// Calls Kraken API private Funding "DepositStatus" endpoint. Retrieves
+// information about recent deposits. Results are sorted by recency, call
+// method GetDepositsStatusPaginated() instead to begin an iterated list of
+// deposits. Accepts functional options args 'options'.
+//
+// # Required Permissions:
+//
+// Funds permissions - Query;
+//
+// # Functional Options:
+//
+// // Filter for specific asset being deposited
+//
+//	func DSWithAsset(asset string) GetDepositsStatusOption
+//
+// // Filter for specific name of deposit method
+//
+//	func DSWithMethod(method string) GetDepositsStatusOption
+//
+// // Start timestamp, deposits created strictly before will not be included in
+// the response
+//
+//	func DSWithStart(start string) GetDepositsStatusOption
+//
+// // End timestamp, deposits created strictly after will be not be included in
+// the response
+//
+//	func DSWithEnd(end string) GetDepositsStatusOption
+//
+// // Number of results to include per page
+//
+//	func DSWithLimit(limit uint) GetDepositsStatusOption
+//
+// ~Filter asset class being deposited. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+//
+// ~func DSWithAssetClass(aclass string) GetDepositsStatusOption~
+//
+// # Example Usage:
+//
+//	deposits, err := kc.GetDepositsStatus()
+func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*[]data.DepositStatus, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WithdrawStatus" endpoint.
-// func (kc *KrakenClient) GetWithdrawalsStatus() (, error) {
-// 	return nil, nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WithdrawCancel" endpoint.
-// func (kc *KrakenClient) CancelWithdrawal() (error) {
-// 	return nil
-// }
+	// Process API response
+	var depositsStatus []data.DepositStatus
+	err = processPrivateApiResponse(res, &depositsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &depositsStatus, nil
+}
 
-// TODO finish implementation checklist
-// Calls Kraken API private Funding "WalletTransfer" endpoint.
-// func (kc *KrakenClient) WalletTransfer() (string, error) {
-// 	return nil, nil
-// }
+// Calls Kraken API private Funding "DepositStatus" endpoint. Begins a paginated
+// list with information about recent deposits. Results are sorted by recency
+// and filtered by functional options args 'options'. After list is initiated via
+// this method, use with (kc *KrakenClient) GetDepositsStatusWithCursor().
+//
+// # Required Permissions:
+//
+// Funds permissions - Query;
+//
+// # Functional Options:
+//
+// // Filter for specific asset being deposited
+//
+//	func DPWithAsset(asset string) GetDepositsStatusPaginatedOption
+//
+// // Filter for specific name of deposit method
+//
+//	func DPWithMethod(method string) GetDepositsStatusPaginatedOption
+//
+// // Start timestamp, deposits created strictly before will not be included in
+// the response
+//
+//	func DPWithStart(start string) GetDepositsStatusPaginatedOption
+//
+// // End timestamp, deposits created strictly after will be not be included in
+// the response
+//
+//	func DPWithEnd(end string) GetDepositsStatusPaginatedOption
+//
+// // Number of results to include per page
+//
+//	func DPWithLimit(limit uint) GetDepositsStatusPaginatedOption
+//
+// ~Filter asset class being deposited. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+//
+// ~func DPWithAssetClass(aclass string) GetDepositsStatusPaginatedOption~
+//
+// # Example Usage:
+//
+//	depositsResp, err := kc.GetDepositsStatusPaginated(krakenspot.DPWithAsset("XBT"), krakenspot.DPWithLimit(5))
+//	deposits := (*depositsResp).Deposits
+//	// do something with deposits
+//	cursor := (*depositsResp).NextCursor
+//	for cursor != "" {
+//		depositsResp, err = kc.GetDepositsStatusCursor(cursor)
+//		// error handling
+//		deposits = (*depositsResp).Deposits
+//		// do something with deposits
+//		cursor = (*depositsResp).NextCursor
+//	}
+func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusPaginatedOption) (*data.DepositStatusPaginated, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("cursor", "true")
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var depositsStatus data.DepositStatusPaginated
+	err = processPrivateApiResponse(res, &depositsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &depositsStatus, nil
+}
+
+// Calls Kraken API private Funding "DepositStatus" endpoint. Requires arg 'cursor'
+// which has been retrieved from a previous call to GetDepositsStatusPaginated()
+// method. Continues paginated list with information about recent deposits. Results
+// are sorted by recency and filtered by 'options' passed to GetDepositsStatusPaginated()
+// previously.
+//
+// # Required Permissions:
+//
+// Funds permissions - Query;
+//
+// # Example Usage:
+//
+//	depositsResp, err := kc.GetDepositsStatusPaginated(krakenspot.DPWithAsset("XBT"), krakenspot.DPWithLimit(5))
+//	deposits := (*depositsResp).Deposits
+//	// do something with deposits
+//	cursor := (*depositsResp).NextCursor
+//	for cursor != "" {
+//		depositsResp, err = kc.GetDepositsStatusCursor(cursor)
+//		// error handling
+//		deposits = (*depositsResp).Deposits
+//		// do something with deposits
+//		cursor = (*depositsResp).NextCursor
+//	}
+func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositStatusPaginated, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("cursor", cursor)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var depositsStatus data.DepositStatusPaginated
+	err = processPrivateApiResponse(res, &depositsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &depositsStatus, nil
+}
+
+// Calls Kraken API private Funding "WithdrawMethods" endpoint. Retrieve a list
+// of withdrawal methods available for the user. Accepts functional options args
+// 'options'.
+//
+// # Required Permissions:
+//
+// Funds permissions - Query; Funds permissions - Withdraw
+//
+// # Functional Options:
+//
+// // Filter methods for specific asset. Defaults to no filter if function is not
+// called
+//
+//	func WMWithAsset(asset string) GetWithdrawalMethodsOption
+//
+// // Filter methods for specific network. Defaults to no filter if function is not
+// called
+//
+//	func WMWithNetwork(network string) GetWithdrawalMethodsOption
+//
+// ~// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+//
+// ~func WMWithAssetClass(aclass string) GetWithdrawalMethodsOption~
+//
+// # Example Usage:
+//
+// withdrawalMethods, err := kc.GetWithdrawalMethods(krakenspot.WMWithNetwork("Ethereum"))
+func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOption) (*[]data.WithdrawalMethod, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawMethods", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalMethods []data.WithdrawalMethod
+	err = processPrivateApiResponse(res, &withdrawalMethods)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalMethods, nil
+}
+
+// Calls Kraken API private Funding "WithdrawAddresses" endpoint. Retrieves a
+// list of withdrawal addresses available for the user. Accepts functional
+// options passed to arg 'options'
+//
+// # Required Permissions:
+//
+// Funds permissions - Query; Funds permissions - Withdraw
+//
+// # Functional Options:
+//
+// // Filter addresses for specific asset
+//
+//	func WAWithAsset(asset string) GetWithdrawalAddressesOption
+//
+// // Filter addresses for specific method
+//
+//	func WAWithMethod(method string) GetWithdrawalAddressesOption
+//
+// // Find address for by withdrawal key name, as set up on your account
+//
+//	func WAWithKey(key string) GetWithdrawalAddressesOption
+//
+// // Filter by verification status of the withdrawal address. Withdrawal addresses
+// successfully completing email confirmation will have a verification status of
+// true.
+//
+//	func WAWithVerified(verified bool) GetWithdrawalAddressesOption
+//
+// ~// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+// ~func WAWithAssetClass(aclass string) GetWithdrawalAddressesOption~
+//
+// # Example Usage:
+//
+//	withdrawalAddresses, err := kc.GetWithdrawalAddresses(krakenspot.WAWithAsset("XBT"), krakenspot.WAWithVerified(true))
+func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddressesOption) (*[]data.WithdrawalAddress, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawAddresses", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalAddresses []data.WithdrawalAddress
+	err = processPrivateApiResponse(res, &withdrawalAddresses)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalAddresses, nil
+}
+
+// Calls Kraken API private Funding "WithdrawInfo" endpoint. Retrieves fee
+// information about potential withdrawals for a specified args 'asset',
+// withdrawal key name 'key', and 'amount'.
+//
+// # Required Permissions:
+//
+// Funds permissions - Query; Funds permissions - Withdraw
+//
+// # Example Usage:
+//
+//	withdrawalinfo, err := kc.GetWithdrawalInfo("XBT", "btc_testnet_with1", "0.725")
+func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount string) (*data.WithdrawalInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("key", key)
+	payload.Add("amount", amount)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawInfo", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalInfo data.WithdrawalInfo
+	err = processPrivateApiResponse(res, &withdrawalInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalInfo, nil
+}
+
+// TODO test if this works
+// Calls Kraken API private Funding "Withdraw" endpoint. Makes a withdrawal
+// request for specified args 'asset', withdrawal key name 'key', and 'amount'.
+// If successful, returns resulting reference ID as a string.
+//
+// # Required Permissions:
+//
+// Funds permissions - Withdraw;
+//
+// # Functional Options:
+//
+// // Optional, crypto address that can be used to confirm address matches key
+// (will return Invalid withdrawal address error if different)
+//
+//	func WFWithAddress(address string) WithdrawFundsOption
+//
+// // Optional, if the processed withdrawal fee is higher than max_fee, withdrawal
+// will fail with EFunding:Max fee exceeded
+//
+//	func WFWithMaxFee(maxFee string) WithdrawFundsOption
+//
+// # Example Usage:
+//
+//	refID, err := kc.WithdrawFunds("XBT", "btc_testnet_with1", "0.725")
+func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, options ...WithdrawFundsOption) (string, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("key", key)
+	payload.Add("amount", amount)
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Withdraw", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return "", err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawFundsResp data.WithdrawFundsResponse
+	err = processPrivateApiResponse(res, &withdrawFundsResp)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return "", err
+	}
+	return withdrawFundsResp.RefID, nil
+}
+
+// Calls Kraken API private Funding "WithdrawStatus" endpoint. Retrieves
+// information about recent withdrawals. Results are sorted by recency, call
+// method GetWithdrawalsStatusPaginated() instead to begin an iterated list of
+// withdrawals. Accepts functional options args 'options'.
+//
+// # Required Permissions:
+//
+// Funds permissions - Withdraw; OR Data - Query ledger entries
+//
+// # Functional Options:
+//
+// // Filter for specific asset being withdrawn
+//
+//	func WSWithAsset(asset string) GetWithdrawalsStatusOption
+//
+// // Filter for specific name of withdrawal method
+//
+//	func WSWithMethod(method string) GetWithdrawalsStatusOption
+//
+// // Start timestamp, withdrawals created strictly before will not be included in
+// the response
+//
+//	func WSWithStart(start string) GetWithdrawalsStatusOption
+//
+// // End timestamp, withdrawals created strictly after will be not be included in
+// the response
+//
+//	func WSWithEnd(end string) GetWithdrawalsStatusOption
+//
+// ~// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+//
+// ~func WSWithAssetClass(aclass string) GetWithdrawalsStatusOption~
+//
+// # Example Usage:
+//
+//	withdrawalStatus, err := kc.GetWithdrawalsStatus(krakenspot.WSWithMethod("Bank Frick (SWIFT)"))
+func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOption) (*[]data.WithdrawalStatus, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalsStatus []data.WithdrawalStatus
+	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalsStatus, nil
+}
+
+// Calls Kraken API private Funding "WithdrawStatus" endpoint. Begins a paginated
+// list with information about recent withdrawals. Results are sorted by recency
+// and filtered by functional options args 'options'. After list is initiated via
+// this method, use with (kc *KrakenClient) GetWithdrawalsStatusWithCursor().
+//
+// # Required Permissions:
+//
+// Funds permissions - Withdraw; OR Data - Query ledger entries
+//
+// # Functional Options:
+//
+// // Filter for specific asset being withdrawn
+//
+//	func WPWithAsset(asset string) GetWithdrawalsStatusPaginatedOption
+//
+// // Filter for specific name of withdrawal method
+//
+//	func WPWithMethod(method string) GetWithdrawalsStatusPaginatedOption
+//
+// // Start timestamp, withdrawals created strictly before will not be included in
+// the response
+//
+//	func WPWithStart(start string) GetWithdrawalsStatusPaginatedOption
+//
+// // End timestamp, withdrawals created strictly after will be not be included in
+// the response
+//
+//	func WPWithEnd(end string) GetWithdrawalsStatusPaginatedOption
+//
+// // Number of results to include per page. Defaults to 500 if function is not called
+//
+//	func WPWithLimit(limit int) GetWithdrawalsStatusPaginatedOption
+//
+// ~// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"~
+//
+// ~func WPWithAssetClass(aclass string) GetWithdrawalsStatusPaginatedOption~
+//
+// # Example Usage:
+//
+//	withdrawalsResp, err := kc.GetWithdrawalsStatusPaginated(krakenspot.WPWithAsset("XBT"), krakenspot.WPWithLimit(5))
+//	withdrawals := (*withdrawalsResp).Withdrawals
+//	// do something with withdrawals
+//	cursor := (*withdrawalsResp).NextCursor
+//	for cursor != "" {
+//		withdrawalsResp, err = kc.GetWithdrawalsStatusWithCursor(cursor)
+//		// error handling
+//		withdrawals = (*withdrawalsResp).Withdrawals
+//		// do something withwithdrawals
+//		cursor = (*withdrawalsResp).NextCursor
+//	}
+func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsStatusPaginatedOption) (*data.WithdrawalStatusPaginated, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("cursor", "true")
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalsStatus data.WithdrawalStatusPaginated
+	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalsStatus, nil
+}
+
+// Calls Kraken API private Funding "WithdrawStatus" endpoint. Requires arg 'cursor'
+// which has been retrieved from a previous call to GetWithdrawalsStatusPaginated()
+// method. Continues paginated list with information about recent withdrawals. Results
+// are sorted by recency and filtered by 'options' passed to GetWithdrawalsStatusPaginated()
+// previously.
+//
+// # Required Permissions:
+//
+// Funds permissions - Withdraw; OR Data - Query ledger entries
+//
+// # Example Usage:
+//
+//	withdrawalsResp, err := kc.GetWithdrawalsStatusPaginated(krakenspot.WPWithAsset("XBT"), krakenspot.WPWithLimit(5))
+//	withdrawals := (*withdrawalsResp).Withdrawals
+//	// do something with withdrawals
+//	cursor := (*withdrawalsResp).NextCursor
+//	for cursor != "" {
+//		withdrawalsResp, err = kc.GetWithdrawalsStatusWithCursor(cursor)
+//		// error handling
+//		withdrawals = (*withdrawalsResp).Withdrawals
+//		// do something withwithdrawals
+//		cursor = (*withdrawalsResp).NextCursor
+//	}
+func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.WithdrawalStatusPaginated, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("cursor", cursor)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var withdrawalsStatus data.WithdrawalStatusPaginated
+	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &withdrawalsStatus, nil
+}
+
+// Calls Kraken API private Funding "WithdrawCancel" endpoint. Cancels a recently
+// requested withdrawal of specified arg 'asset' with 'refID', if it has not
+// already been successfully processed.
+//
+// # Required Permissions:
+//
+// Funds permissions - Withdraw;
+//
+// # Example Usage:
+//
+// err := kc.CancelWithdrawal("XBT", "FTQcuak-V6Za8qrWnhzTx67yYHz8Tg")
+func (kc *KrakenClient) CancelWithdrawal(asset string, refID string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("refid", refID)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WithdrawCancel", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var cancelSuccessful bool
+	err = processPrivateApiResponse(res, &cancelSuccessful)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return err
+	}
+	if !cancelSuccessful {
+		err = fmt.Errorf("withdrawal cancellation was unsuccessful but no errors returned. check inputs and try again if necessary")
+		return err
+	}
+	return nil
+}
+
+// Calls Kraken API private Funding "WalletTransfer" endpoint. Transfers specified
+// arg 'amount' of 'asset' from Kraken spot wallet to Kraken Futures wallet. Note
+// that a transfer in the other direction must be requested via the Kraken Futures
+// API endpoint for withdrawals to Spot wallets
+//
+// # Required Permissions:
+//
+// Funds permissions - Query;
+//
+// # Example Usage:
+//
+//	refID, err := kc.TransferToFutures("ZUSD", "10000")
+func (kc *KrakenClient) TransferToFutures(asset string, amount string) (string, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("amount", amount)
+	payload.Add("to", "Futures Wallet")
+	payload.Add("from", "Spot Wallet")
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"WalletTransfer", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return "", err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var refID data.WalletTransferResponse
+	err = processPrivateApiResponse(res, &refID)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return "", err
+	}
+
+	return refID.RefID, err
+}
 
 // #endregion
 

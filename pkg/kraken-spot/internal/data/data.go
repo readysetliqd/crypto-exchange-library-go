@@ -565,6 +565,95 @@ type DeleteReportResp struct {
 
 // #region Private Funding Data structs
 
+type DepositMethod struct {
+	Method             string      `json:"method"`
+	MinDeposit         string      `json:"minimum"`
+	MaxDeposit         interface{} `json:"limit"`
+	Fee                string      `json:"fee"`
+	AddressSetupFee    string      `json:"address-setup-fee"`
+	CanGenerateAddress bool        `json:"gen-address"`
+}
+
+type DepositAddress struct {
+	Address    string      `json:"address"`
+	ExpireTime string      `json:"expiretm"`
+	New        bool        `json:"new"`
+	Memo       string      `json:"memo"`
+	Tag        interface{} `json:"tag"`
+}
+
+type DepositStatus struct {
+	Method         string      `json:"method"`
+	AssetClass     string      `json:"aclass"`
+	Asset          string      `json:"asset"`
+	RefID          string      `json:"refid"`
+	TxID           string      `json:"txid"`
+	Info           string      `json:"info"`
+	Amount         string      `json:"amount"`
+	Fee            interface{} `json:"fee"`
+	TimeRequested  int32       `json:"time"`
+	Status         interface{} `json:"status"`
+	StatusProperty string      `json:"status-prop"`
+	Originators    []string    `json:"originators"`
+}
+
+type DepositStatusPaginated struct {
+	Deposits   []DepositStatus `json:"deposits"`
+	NextCursor string          `json:"next_cursor"`
+}
+
+type WithdrawalMethod struct {
+	Asset   string `json:"asset"`
+	Method  string `json:"method"`
+	Network string `json:"network"`
+	Minimum string `json:"minimum"`
+}
+
+type WithdrawalAddress struct {
+	Address  string `json:"address"`
+	Asset    string `json:"asset"`
+	Method   string `json:"method"`
+	Key      string `json:"key"`
+	Memo     string `json:"memo"`
+	Verified bool   `json:"verified"`
+}
+
+type WithdrawalInfo struct {
+	Method string `json:"method"`
+	Limit  string `json:"limit"`
+	Amount string `json:"amount"`
+	Fee    string `json:"fee"`
+}
+
+type WithdrawFundsResponse struct {
+	RefID string `json:"refid"`
+}
+
+type WithdrawalStatus struct {
+	Method         string      `json:"method"`
+	Network        string      `json:"network"`
+	AssetClass     string      `json:"aclass"`
+	Asset          string      `json:"asset"`
+	RefID          string      `json:"refid"`
+	TxID           string      `json:"txid"`
+	Info           string      `json:"info"`
+	Amount         string      `json:"amount"`
+	Fee            interface{} `json:"fee"`
+	TimeRequested  int32       `json:"time"`
+	Status         string      `json:"status"`
+	StatusProperty string      `json:"status-prop"`
+	Key            string      `json:"key"`
+}
+
+type WithdrawalStatusPaginated struct {
+	Withdrawals []WithdrawalStatus `json:"withdrawals"`
+	NextCursor  string             `json:"next_cursor"`
+}
+
+type WalletTransferResponse struct {
+	RefID string `json:"refid"`
+}
+
 // #endregion
 
 // #region Private Subaccounts Data structs

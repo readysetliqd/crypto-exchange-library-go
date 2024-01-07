@@ -6,6 +6,7 @@ import (
 )
 
 // #region Private Account Data endpoints functional options
+
 // For *KrakenClient method GetOpenOrders()
 type GetOpenOrdersOption func(payload url.Values)
 
@@ -422,6 +423,308 @@ func RLWithEnd(end int) RequestLedgersExportReportOption {
 // #endregion
 
 // #region Private Funding endpoints functional options
+
+// For *KrakenClient method GetDepositMethods()
+type GetDepositMethodsOption func(payload url.Values)
+
+// Asset class being deposited (optional). Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func DMWithAssetClass(aclass string) GetDepositMethodsOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method GetDepositAddresses()
+type GetDepositAddressesOption func(payload url.Values)
+
+// Whether or not to generate a new address. Defaults to false if function is
+// not called.
+func DAWithNew() GetDepositAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("new", "true")
+	}
+}
+
+// Amount you wish to deposit (only required for method=Bitcoin Lightning)
+func DAWithAmount(amount string) GetDepositAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("amount", amount)
+	}
+}
+
+// For *KrakenClient method GetDepositsStatus()
+type GetDepositsStatusOption func(payload url.Values)
+
+// Filter for specific asset being deposited
+func DSWithAsset(asset string) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter for specific name of deposit method
+func DSWithMethod(method string) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("method", method)
+	}
+}
+
+// Start timestamp, deposits created strictly before will not be included in
+// the response
+func DSWithStart(start string) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("start", start)
+	}
+}
+
+// End timestamp, deposits created strictly after will be not be included in
+// the response
+func DSWithEnd(end string) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("end", end)
+	}
+}
+
+// Number of results to include per page
+func DSWithLimit(limit uint) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("limit", fmt.Sprintf("%v", limit))
+	}
+}
+
+// Filter asset class being deposited. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func DSWithAssetClass(aclass string) GetDepositsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method GetDepositsStatusPaginated()
+type GetDepositsStatusPaginatedOption func(payload url.Values)
+
+// Filter for specific asset being deposited
+func DPWithAsset(asset string) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter for specific name of deposit method
+func DPWithMethod(method string) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("method", method)
+	}
+}
+
+// Start timestamp, deposits created strictly before will not be included in
+// the response
+func DPWithStart(start string) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("start", start)
+	}
+}
+
+// End timestamp, deposits created strictly after will be not be included in
+// the response
+func DPWithEnd(end string) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("end", end)
+	}
+}
+
+// Number of results to include per page
+func DPWithLimit(limit uint) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("limit", fmt.Sprintf("%v", limit))
+	}
+}
+
+// Filter asset class being deposited. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func DPWithAssetClass(aclass string) GetDepositsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method GetWithdrawalMethods()
+type GetWithdrawalMethodsOption func(payload url.Values)
+
+// Filter methods for specific asset. Defaults to no filter if function is not
+// called
+func WMWithAsset(asset string) GetWithdrawalMethodsOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter methods for specific network. Defaults to no filter if function is not
+// called
+func WMWithNetwork(network string) GetWithdrawalMethodsOption {
+	return func(payload url.Values) {
+		payload.Add("network", network)
+	}
+}
+
+// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func WMWithAssetClass(aclass string) GetWithdrawalMethodsOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method GetWithdrawalAddresses()
+type GetWithdrawalAddressesOption func(payload url.Values)
+
+// Filter addresses for specific asset
+func WAWithAsset(asset string) GetWithdrawalAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter addresses for specific method
+func WAWithMethod(method string) GetWithdrawalAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("method", method)
+	}
+}
+
+// Find address for by withdrawal key name, as set up on your account
+func WAWithKey(key string) GetWithdrawalAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("key", key)
+	}
+}
+
+// Filter by verification status of the withdrawal address. Withdrawal addresses
+// successfully completing email confirmation will have a verification status of
+// true.
+func WAWithVerified(verified bool) GetWithdrawalAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("verified", fmt.Sprintf("%v", verified))
+	}
+}
+
+// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func WAWithAssetClass(aclass string) GetWithdrawalAddressesOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method WithdrawFunds()
+type WithdrawFundsOption func(payload url.Values)
+
+// Optional, crypto address that can be used to confirm address matches key
+// (will return Invalid withdrawal address error if different)
+func WFWithAddress(address string) WithdrawFundsOption {
+	return func(payload url.Values) {
+		payload.Add("address", address)
+	}
+}
+
+// Optional, if the processed withdrawal fee is higher than max_fee, withdrawal
+// will fail with EFunding:Max fee exceeded
+func WFWithMaxFee(maxFee string) WithdrawFundsOption {
+	return func(payload url.Values) {
+		payload.Add("max_fee", maxFee)
+	}
+}
+
+// For *KrakenClient method GetWithdrawalsStatus()
+type GetWithdrawalsStatusOption func(payload url.Values)
+
+// Filter for specific asset being withdrawn
+func WSWithAsset(asset string) GetWithdrawalsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter for specific name of withdrawal method
+func WSWithMethod(method string) GetWithdrawalsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("method", method)
+	}
+}
+
+// Start timestamp, withdrawals created strictly before will not be included in
+// the response
+func WSWithStart(start string) GetWithdrawalsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("start", start)
+	}
+}
+
+// End timestamp, withdrawals created strictly after will be not be included in
+// the response
+func WSWithEnd(end string) GetWithdrawalsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("end", end)
+	}
+}
+
+// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func WSWithAssetClass(aclass string) GetWithdrawalsStatusOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
+// For *KrakenClient method GetWithdrawalsStatusPaginated()
+type GetWithdrawalsStatusPaginatedOption func(payload url.Values)
+
+// Filter for specific asset being withdrawn
+func WPWithAsset(asset string) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("asset", asset)
+	}
+}
+
+// Filter for specific name of withdrawal method
+func WPWithMethod(method string) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("method", method)
+	}
+}
+
+// Start timestamp, withdrawals created strictly before will not be included in
+// the response
+func WPWithStart(start string) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("start", start)
+	}
+}
+
+// End timestamp, withdrawals created strictly after will be not be included in
+// the response
+func WPWithEnd(end string) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("end", end)
+	}
+}
+
+// Number of results to include per page. Defaults to 500 if function is not called
+func WPWithLimit(limit int) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("limit", fmt.Sprintf("%v", limit))
+	}
+}
+
+// Filter asset class being withdrawn. Defaults to "currency" if function is
+// not called. As of 1/7/24, only known valid asset class is "currency"
+func WPWithAssetClass(aclass string) GetWithdrawalsStatusPaginatedOption {
+	return func(payload url.Values) {
+		payload.Add("aclass", aclass)
+	}
+}
+
 // #endregion
 
 // #region Private Earn endpoints functional options
