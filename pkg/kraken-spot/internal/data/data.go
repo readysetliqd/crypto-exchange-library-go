@@ -569,6 +569,11 @@ type DeleteReportResp struct {
 
 // #region Private Subaccounts Data structs
 
+type AccountTransfer struct {
+	TransferID string `json:"transfer_id"`
+	Status     string `json:"status"`
+}
+
 // #endregion
 
 // #region Private Earn Data structs

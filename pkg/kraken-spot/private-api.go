@@ -1234,17 +1234,85 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // #region Authenticated Subaccounts endpoints
 
-// TODO finish implementation checklist
-// Calls Kraken API private Subaccounts "CreateSubaccount" endpoint.
-// func (kc *KrakenClient) CreateSubaccount() (error) {
-// 	return nil
-// }
+// Calls Kraken API private Subaccounts "CreateSubaccount" endpoint. Creates a
+// trading subaccount with details passed to args 'username' and 'email'
+//
+// Note: Subaccounts are currently only available to institutional clients.
+// Please contact your Account Manager for more details.
+//
+// Required Permissions: Institutional verification
+//
+// # Example Usage:
+//
+//	err := kc.CreateSubaccount("kraken-sub-1", "bryptotrader123@aol.com")
+func (kc *KrakenClient) CreateSubaccount(username string, email string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("username", username)
+	payload.Add("email", email)
 
-// TODO finish implementation checklist
-// Calls Kraken API private Subaccounts "AccountTransfer" endpoint.
-// func (kc *KrakenClient) AccountTransfer() (, error) {
-// 	return nil
-// }
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"CreateSubaccount", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var result bool
+	err = processPrivateApiResponse(res, &result)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return err
+	}
+	if !result {
+		err = fmt.Errorf("something went wrong. check inputs and try again if necessary")
+		return err
+	}
+	return nil
+}
+
+// Calls Kraken API private Subaccounts "AccountTransfer" endpoint. Transfer
+// funds to and from master and subaccounts.
+//
+// Note: AccountTransfer must be called by the master account.
+//
+// Note: Subaccounts are currently only available to institutional clients.
+// Please contact your Account Manager for more details.
+//
+// Required Permissions: Institutional verification
+//
+// # Example Usage:
+//
+//	transfer, err := kc.AccountTransfer("XBT", "1.0", "ABCD 1234 EFGH 5678", "IJKL 0987 MNOP 6543")
+func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount string, toAccount string) (*data.AccountTransfer, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("asset", asset)
+	payload.Add("amount", amount)
+	payload.Add("fromAccount", fromAccount)
+	payload.Add("toAccount", toAccount)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"AccountTransfer", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var transfer data.AccountTransfer
+	err = processPrivateApiResponse(res, &transfer)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &transfer, nil
+}
 
 // #endregion
 
@@ -1296,8 +1364,6 @@ func (kc *KrakenClient) AllocateEarnFunds(strategyID string, amount string) erro
 	return nil
 }
 
-// TODO finish implementation checklist
-// TODO write doc comments
 // Calls Kraken API private Earn "Deallocate" endpoint. Deallocate funds to the
 // strategy with specified ID passed to arg 'strategyID'. Pass desired amount of
 // base currency to deallocate in string format to arg 'amount'.
