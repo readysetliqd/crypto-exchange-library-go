@@ -155,6 +155,7 @@ func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance,
 	var balances map[string]data.ExtendedBalance
 	err = processPrivateApiResponse(res, &balances)
 	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
 		return nil, err
 	}
 	return &balances, nil
@@ -272,6 +273,7 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 	var balance data.TradeBalance
 	err = processPrivateApiResponse(res, &balance)
 	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
 		return nil, err
 	}
 	return &balance, nil
@@ -1248,28 +1250,168 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 // #region Authenticated Earn endpoints
 
-// TODO finish implementation checklist
-// Calls Kraken API private Earn "Allocate" endpoint.
-func (kc *KrakenClient) AllocateEarnFunds() error {
+// Calls Kraken API private Earn "Allocate" endpoint. Allocate funds to the strategy
+// with specified ID passed to arg 'strategyID'. Pass desired amount of base
+// currency to allocate in string format to arg 'amount'.
+//
+// Note: This method is asynchronous. A couple of preflight checks are performed
+// synchronously on behalf of the method before it is dispatched further. The
+// client is required to poll the result using the (kc *KrakenClient) AllocationStatus()
+// method.
+//
+// Note: There can be only one (de)allocation request in progress for given user
+// and strategy.
+//
+// Required permissions: Funds permissions - Earn
+//
+// # Example Usage:
+//
+//	err := kc.AllocateEarnFunds("ESXUM7H-SJHQ6-KOQNNI", "5")
+func (kc *KrakenClient) AllocateEarnFunds(strategyID string, amount string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("strategy_id", strategyID)
+	payload.Add("amount", amount)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/Allocate", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var result bool
+	err = processPrivateApiResponse(res, &result)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return err
+	}
+	if !result {
+		err = fmt.Errorf("something went wrong. check inputs and allocation status and try again if necessary")
+		return err
+	}
 	return nil
 }
 
 // TODO finish implementation checklist
-// Calls Kraken API private Earn "Deallocate" endpoint.
-func (kc *KrakenClient) DeallocateEarnFunds() error {
+// TODO write doc comments
+// Calls Kraken API private Earn "Deallocate" endpoint. Deallocate funds to the
+// strategy with specified ID passed to arg 'strategyID'. Pass desired amount of
+// base currency to deallocate in string format to arg 'amount'.
+//
+// Note: This method is asynchronous. A couple of preflight checks are performed
+// synchronously on behalf of the method before it is dispatched further. The
+// client is required to poll the result using the (kc *KrakenClient) DeallocationStatus()
+// method.
+//
+// Note: There can be only one (de)allocation request in progress for given user
+// and strategy.
+//
+// Required permissions: Funds permissions - Earn
+//
+// # Example Usage:
+//
+//	err := kc.AllocateEarnFunds("ESXUM7H-SJHQ6-KOQNNI", "5")
+func (kc *KrakenClient) DeallocateEarnFunds(strategyID string, amount string) error {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("strategy_id", strategyID)
+	payload.Add("amount", amount)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/Deallocate", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var result bool
+	err = processPrivateApiResponse(res, &result)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return err
+	}
+	if !result {
+		err = fmt.Errorf("something went wrong. check inputs and deallocation status and try again if necessary")
+		return err
+	}
 	return nil
 }
 
-// TODO finish implementation checklist
-// Calls Kraken API private Earn "AllocateStatus" endpoint.
-func (kc *KrakenClient) AllocationStatus() (bool, error) {
-	return false, nil
+// Calls Kraken API private Earn "AllocateStatus" endpoint. Gets the status of
+// the last allocation request for specific strategy ID passed to arg 'strategyID'.
+// Returns true if the request is still pending, false if it is completed, and
+// an api error if there was an issue with the request. API will also return false
+// with no errors for strategies on which the account has never made a request.
+//
+// Required Permissions: Funds permissions - Query OR Funds permissions - Earn
+//
+// # Example Usage:
+//
+//	pending, err := kc.AllocationStatus("ESSR5EH-CKYSY-NUQNZI")
+func (kc *KrakenClient) AllocationStatus(strategyID string) (bool, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("strategy_id", strategyID)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/AllocateStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return false, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var status data.AllocationStatus
+	err = processPrivateApiResponse(res, &status)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return false, err
+	}
+	return status.Pending, nil
 }
 
-// TODO finish implementation checklist
-// Calls Kraken API private Earn "DeallocateStatus" endpoint.
-func (kc *KrakenClient) DeallocationStatus() (bool, error) {
-	return false, nil
+// Calls Kraken API private Earn "DeallocateStatus" endpoint. Gets the status of
+// the last deallocation request for specific strategy ID passed to arg 'strategyID'.
+// Returns true if the request is still pending, false if it is completed, and
+// an api error if there was an issue with the request. API will also return false
+// with no errors for strategies on which the account has never made a request.
+//
+// Required Permissions: Funds permissions - Query OR Funds permissions - Earn
+//
+// # Example Usage:
+//
+//	pending, err := kc.DeallocationStatus("ESSR5EH-CKYSY-NUQNZI")
+func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("strategy_id", strategyID)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"Earn/DeallocateStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return false, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var status data.AllocationStatus
+	err = processPrivateApiResponse(res, &status)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return false, err
+	}
+	return status.Pending, nil
 }
 
 // Calls Kraken API private Earn "Strategies" endpoint. Returns earn strategies
@@ -1342,6 +1484,7 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 	var strategies data.EarnStrategiesResp
 	err = processPrivateApiResponse(res, &strategies)
 	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
 		return nil, err
 	}
 	return &strategies, nil
@@ -1395,6 +1538,7 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 	var allocations data.EarnAllocationsResp
 	err = processPrivateApiResponse(res, &allocations)
 	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
 		return nil, err
 	}
 	return &allocations, nil
@@ -1433,6 +1577,7 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 	var token data.WebSocketsToken
 	err = processPrivateApiResponse(res, &token)
 	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
 		return nil, err
 	}
 	return &token, nil

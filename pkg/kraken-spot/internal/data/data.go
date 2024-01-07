@@ -573,6 +573,10 @@ type DeleteReportResp struct {
 
 // #region Private Earn Data structs
 
+type AllocationStatus struct {
+	Pending bool `json:"pending"`
+}
+
 type EarnStrategiesResp struct {
 	Strategies []EarnStrategy `json:"items"`
 	NextCursor string         `json:"next_cursor"`
