@@ -26,6 +26,12 @@ func GetServerTime() (*data.ServerTime, error) {
 
 // Calls Kraken API public market data "SystemStatus" endpoint. Gets the current
 // system status or trading mode
+//
+// # Example Usage:
+//
+//	status, err := krakenspot.GetSystemStatus()
+//	log.Println(status.Status)
+//	log.Println(status.Timestamp)
 func GetSystemStatus() (*data.SystemStatus, error) {
 	systemStatus := &data.SystemStatus{}
 	err := callPublicApi("SystemStatus", systemStatus)
@@ -38,6 +44,13 @@ func GetSystemStatus() (*data.SystemStatus, error) {
 // Calls Kraken API public market data "SystemStatus" endpoint and returns true
 // if system is online. Returns false and current status as a string if not
 // online. Returns false and error if error produced from calling API.
+//
+// # Example Usage:
+//
+//	online, status := krakenspot.SystemIsOnline()
+//	if !online {
+//		log.Println(status)
+//	}
 func SystemIsOnline() (bool, string) {
 	systemStatus, err := GetSystemStatus()
 	if err != nil {

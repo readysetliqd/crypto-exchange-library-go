@@ -420,6 +420,613 @@ func RLWithEnd(end int) RequestLedgersExportReportOption {
 // #endregion
 
 // #region Private Trading endpoints functional options
+
+type OrderType func(payload url.Values)
+
+// Instantly market orders in at best current prices
+func Market() OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "market")
+	}
+}
+
+// Order type of "limit" where arg 'price' is the level at which the limit order
+// will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func Limit(price string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "limit")
+		payload.Add("price", price)
+	}
+}
+
+// Order type of "stop-loss" order type where arg 'price' is the stop loss
+// trigger price
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func StopLoss(price string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "stop-loss")
+		payload.Add("price", price)
+	}
+}
+
+// Order type of "take-profit" where arg 'price' is the take profit trigger price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func TakeProfit(price string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "take-profit")
+		payload.Add("price", price)
+	}
+}
+
+// Order type of "stop-loss-limit" where arg 'price' is the stop loss trigger
+// price and arg 'price2' is the limit order that will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func StopLossLimit(price, price2 string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "stop-loss-limit")
+		payload.Add("price", price)
+		payload.Add("price2", price2)
+	}
+}
+
+// Order type of "take-profit-limit" where arg 'price' is the take profit trigger
+// price and arg 'price2' is the limit order that will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func TakeProfitLimit(price, price2 string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "take-profit-limit")
+		payload.Add("price", price)
+		payload.Add("price2", price2)
+	}
+}
+
+// Order type of "trailing-stop" where arg 'price' is the relative stop trigger
+// price.
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func TrailingStop(price string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "trailing-stop")
+		payload.Add("price", price)
+	}
+}
+
+// Order type of "trailing-stop-limit" where arg 'price' is the relative stop
+// trigger price and arg 'price2' is the limit order that will be placed.
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Note: In practice, the system will accept either relative or specific (without +
+// or -) for arg 'price2' despite what the docs say. The note is included here
+// just in case; Kraken API docs: Must use a relative price for this field, namely
+// one of the + or - prefixes. This will provide the offset from the trigger price
+// to the limit price, i.e. +0 would set the limit price equal to the trigger price.
+// The % suffix also works for this field to use a relative percentage limit price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func TrailingStopLimit(price, price2 string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "trailing-stop-limit")
+		payload.Add("price", price)
+		payload.Add("price2", price2)
+	}
+}
+
+// Order type of "settle-position". Settles any open margin position of same
+// 'direction' and 'pair' by amount 'volume'
+//
+// Note: AddOrder() arg 'volume' can be set to "0" for closing margin orders to
+// automatically fill the requisite quantity
+//
+// Note: Required arg 'leverage' is a required parameter by the API, but in
+// practice can be any valid value. Value of 'leverage' here has no effect as
+// leverage is already set by the opened position.
+func SettlePosition(leverage string) OrderType {
+	return func(payload url.Values) {
+		payload.Add("ordertype", "settle-position")
+		payload.Add("leverage", leverage)
+	}
+}
+
+type AddOrderOption func(payload url.Values)
+
+// User reference id 'userref' is an optional user-specified integer id that
+// can be associated with any number of orders. Many clients choose a userref
+// corresponding to a unique integer id generated by their systems (e.g. a
+// timestamp). However, because we don't enforce uniqueness on our side, it
+// can also be used to easily group orders by pair, side, strategy, etc. This
+// allows clients to more readily cancel or query information about orders in
+// a particular group, with fewer API calls by using userref instead of our
+// txid, where supported.
+func UserRef(userRef string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("userref", userRef)
+	}
+}
+
+// Used to create an iceberg order, this is the visible order quantity in terms
+// of the base asset. The rest of the order will be hidden, although the full
+// volume can be filled at any time by any order of that size or larger that
+// matches in the order book. DisplayVolume() can only be used with the Limit()
+// order type. Must be greater than 0, and less than AddOrder() arg 'volume'.
+func DisplayVolume(displayVol string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("displayvol", displayVol)
+	}
+}
+
+// Price signal used to trigger stop-loss, stop-loss-limit, take-profit,
+// take-profit-limit, trailing-stop and trailing-stop-limit orders. Defaults to
+// "last" trigger type if not called. Calling this function overrides default to
+// "index".
+//
+// Note: This trigger type will also be used for any associated conditional
+// close orders.
+//
+// Note: To keep triggers serviceable, the last price will be used as fallback
+// reference price during connectivity issues with external index feeds.
+func IndexTrigger() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("trigger", "index")
+	}
+}
+
+// Amount of leverage desired. Defaults to no leverage if function is not called.
+// API accepts string of any number; in practice, must be some integer >= 2
+//
+// Note: This function should not be used when calling AddOrder() with the
+// SettlePosition() 'orderType'
+func Leverage(leverage string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("leverage", leverage)
+	}
+}
+
+// If true, order will only reduce a currently open position, not increase it
+// or open a new position. Defaults to false if not passed.
+//
+// Note: ReduceOnly() is only usable with leveraged orders. This includes orders
+// of 'orderType' SettlePosition() and orders with Leverage() passed to 'options'
+func ReduceOnly() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("reduce_only", "true")
+	}
+}
+
+// Sets self trade behavior to "cancel-oldest". Overrides default value when called.
+// Default "cancel-newest"
+//
+// CAUTION: Mutually exclusive with STPCancelBoth(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "stptype"
+// value will be overridden.
+//
+// Self trade prevention behavior definition:
+//
+// "cancel-newest" - if self trade is triggered, arriving order will be canceled
+//
+// "cancel-oldest" - if self trade is triggered, resting order will be canceled
+//
+// "cancel-both" - if self trade is triggered, both arriving and resting orders
+// will be canceled
+func STPCancelOldest() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("stptype", "cancel-oldest")
+	}
+}
+
+// Sets self trade behavior to "cancel-both". Overrides default value when called.
+// Default "cancel-newest"
+//
+// CAUTION: Mutually exclusive with STPCancelOldest(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "stptype"
+// value will be overridden.
+//
+// Self trade prevention behavior definition:
+//
+// "cancel-newest" - if self trade is triggered, arriving order will be canceled
+//
+// "cancel-oldest" - if self trade is triggered, resting order will be canceled
+//
+// "cancel-both" - if self trade is triggered, both arriving and resting orders
+// will be canceled
+func STPCancelBoth() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("stptype", "cancel-both")
+	}
+}
+
+// Post-only order (available when ordertype = limit)
+func PostOnly() AddOrderOption {
+	return func(payload url.Values) {
+		addFlag(payload, "post")
+	}
+}
+
+// Prefer fee in base currency (default if selling)
+//
+// CAUTION: Mutually exclusive with FCIQ(). Only call one of these two at a time
+func FCIB() AddOrderOption {
+	return func(payload url.Values) {
+		addFlag(payload, "fcib")
+	}
+}
+
+// Prefer fee in quote currency (default if buying)
+//
+// CAUTION: Mutually exclusive with FCIB(). Only call one of these two at a time
+func FCIQ() AddOrderOption {
+	return func(payload url.Values) {
+		addFlag(payload, "fciq")
+	}
+}
+
+// Disables market price protection for market orders
+func NOMPP() AddOrderOption {
+	return func(payload url.Values) {
+		addFlag(payload, "nompp")
+	}
+}
+
+// Order volume expressed in quote currency. This is supported only for market orders.
+func VIQC() AddOrderOption {
+	return func(payload url.Values) {
+		addFlag(payload, "viqc")
+	}
+}
+
+// Helper function for building "oflags" parameter
+func addFlag(payload url.Values, flag string) {
+	if oflags, ok := payload["oflags"]; ok {
+		// "oflags" key exists, append the new flag
+		payload.Set("oflags", oflags[0]+","+flag)
+	} else {
+		// "oflags" key doesn't exist, add the new flag
+		payload.Add("oflags", flag)
+	}
+}
+
+// Time-in-force of the order to specify how long it should remain in the order
+// book before being cancelled. Overrides default value with "IOC" (Immediate Or
+// Cancel). IOC will immediately execute the amount possible and cancel any
+// remaining balance rather than resting in the book. Defaults to "GTC" (Good
+// 'Til Canceled) if function is not called.
+//
+// CAUTION: Mutually exclusive with GoodTilDate(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "timeinforce"
+// value will be overridden.
+func ImmediateOrCancel() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("timeinforce", "IOC")
+	}
+}
+
+// Time-in-force of the order to specify how long it should remain in the order
+// book before being cancelled. Overrides default value with "GTD" (Good Til Date).
+// GTD, if called, will cause the order to expire at specified unix time passed
+// to arg 'expireTime'. Expiration time, can be specified as an absolute timestamp
+// or as a number of seconds in the future:
+//
+// 0 no expiration (default)
+//
+// <n> = unix timestamp of expiration time
+//
+// +<n> = expire <n> seconds from now, minimum 5 seconds
+//
+// Note: URL encoding of the + character changes it to a space, so please use
+// %2b followed by the number of seconds instead of +
+//
+// CAUTION: Mutually exclusive with ImmediateOrCancel(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "timeinforce"
+// value will be overridden.
+func GoodTilDate(expireTime string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("timeinforce", "GTD")
+		payload.Add("expiretm", expireTime)
+	}
+}
+
+// Conditional close of "limit" order type where arg 'price' is the level at which
+// the limit order will be placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseLimit(price string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "limit")
+		payload.Add("close[price]", price)
+	}
+}
+
+// Conditional close of "stop-loss" order type where arg 'price' is the stop
+// loss trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseStopLoss(price string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "stop-loss")
+		payload.Add("close[price]", price)
+	}
+}
+
+// Conditional close of "take-profit" order type where arg 'price' is the take
+// profit trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseTakeProfit(price string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "take-profit")
+		payload.Add("close[price]", price)
+	}
+}
+
+// Conditional close of "stop-loss-limit" order type where arg 'price' is the
+// stop loss trigger price and arg 'price2' is the limit order that will be placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseStopLossLimit(price, price2 string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "stop-loss-limit")
+		payload.Add("close[price]", price)
+		payload.Add("close[price2]", price2)
+	}
+}
+
+// Conditional close of "take-profit-limit" order type where arg 'price' is the
+// take profit trigger price and arg 'price2' is the limit order that will be
+// placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseTakeProfitLimit(price, price2 string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "take-profit-limit")
+		payload.Add("close[price]", price)
+		payload.Add("close[price2]", price2)
+	}
+}
+
+// Conditional close of "trailing-stop" order type where arg 'price' is the relative
+// stop trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseTrailingStop(price string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "trailing-stop")
+		payload.Add("close[price]", price)
+	}
+}
+
+// Conditional close of "trailing-stop-limit" order type where arg 'price' is the
+// relative stop trigger price and arg 'price2' is the limit order that will be
+// placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format Close<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Note: In practice, the system will accept either relative or specific (without +
+// or -) for arg 'price2' despite what the docs say. The note is included here
+// just in case; Kraken API docs: Must use a relative price for this field, namely
+// one of the + or - prefixes. This will provide the offset from the trigger price
+// to the limit price, i.e. +0 would set the limit price equal to the trigger price.
+// The % suffix also works for this field to use a relative percentage limit price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func CloseTrailingStopLimit(price, price2 string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("close[ordertype]", "trailing-stop-limit")
+		payload.Add("close[price]", price)
+		payload.Add("close[price2]", price2)
+	}
+}
+
+// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+// engine should reject the new order request to arg 'deadline'.
+//
+// In presence of latency or order queueing: min now() + 2 seconds, max now() +
+// 60 seconds.
+//
+// Example Usage:
+//
+// AddWithDeadline(time.Now().Add(time.Second*30).Format(time.RFC3339))
+func AddWithDeadline(deadline string) AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("deadline", deadline)
+	}
+}
+
+// Validates inputs only. Do not submit order. Defaults to "false" if not called.
+func ValidateAddOrder() AddOrderOption {
+	return func(payload url.Values) {
+		payload.Add("validate", "true")
+	}
+}
+
+type AddOrderBatchOption func(payload url.Values)
+
+// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+// engine should reject the new order request to arg 'deadline'.
+//
+// In presence of latency or order queueing: min now() + 2 seconds, max now() +
+// 60 seconds.
+func AddBatchWithDeadline(deadline string) AddOrderBatchOption {
+	return func(payload url.Values) {
+		payload.Add("deadline", deadline)
+	}
+}
+
+// Validates inputs only. Do not submit order. Defaults to "false" if not called.
+func ValidateAddOrderBatch() AddOrderBatchOption {
+	return func(payload url.Values) {
+		payload.Add("validate", "true")
+	}
+}
+
 // #endregion
 
 // #region Private Funding endpoints functional options

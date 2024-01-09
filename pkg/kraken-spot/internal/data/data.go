@@ -561,6 +561,30 @@ type DeleteReportResp struct {
 
 // #region Private Trading Data structs
 
+type AddOrderResp struct {
+	Description AddOrderDescription `json:"descr"`
+	TxID        []string            `json:"txid"`
+}
+
+type AddOrderDescription struct {
+	OrderDescription string `json:"order"`
+	CloseDescription string `json:"close"`
+}
+
+type AddOrderBatchResp struct {
+	Orders []BatchResp `json:"orders"`
+}
+
+type BatchResp struct {
+	Description BatchOrderDescription `json:"descr"`
+	Error       string                `json:"error"`
+	TxID        string                `json:"txid"`
+}
+
+type BatchOrderDescription struct {
+	OrderDescription string `json:"order"`
+}
+
 // #endregion
 
 // #region Private Funding Data structs
