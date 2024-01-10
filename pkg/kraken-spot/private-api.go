@@ -1417,12 +1417,12 @@ func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair st
 //
 //	// Layers 15 bids on Bitcoin/USD every 1% down from startingPrice
 //	startingPrice := 46000
-//	orders := make([]ks.BatchOrder, 15)
+//	orders := make([]krakenspot.BatchOrder, 15)
 //	for i := 0; i < 15; i++ {
-//		newOrder := ks.NewBatchOrder("limit", "buy", "0.1").SetPrice(fmt.Sprintf("%.1f", float64(startingPrice)-(math.Pow(1.01, float64(i))-1)*float64(startingPrice)))
+//		newOrder := krakenspot.NewBatchOrder("limit", "buy", "0.1").SetPrice(fmt.Sprintf("%.1f", float64(startingPrice)-(math.Pow(1.01, float64(i))-1)*float64(startingPrice)))
 //		orders[i] = *newOrder
 //	}
-//	batchOrderResp, err := kc.AddOrderBatch(orders, "XXBTZUSD", ks.ValidateAddOrderBatch())
+//	batchOrderResp, err := kc.AddOrderBatch(orders, "XXBTZUSD", krakenspot.ValidateAddOrderBatch())
 //	if err != nil {
 //		log.Println("error sending batch | ", err)
 //	}
@@ -1462,8 +1462,25 @@ func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options 
 	return &newOrders, nil
 }
 
-// TODO finish implementation checklist
-// Calls Kraken API private Trading "EditOrder" endpoint.
+// Calls Kraken API private Trading "EditOrder" endpoint. Edit volume and price
+// on open orders with transaction ID or user reference ID passed to arg 'refID'.
+// If reference ID is used, it must be unique to only one order. Uneditable
+// orders include triggered stop/profit orders, orders with conditional close
+// terms attached, those already cancelled or filled, and those where the
+// executed volume is greater than the newly supplied volume. Accepts any
+// number of functional options passed to arg 'options'; see list below and/or
+// options.go for further docs notes for options.
+//
+// Note: Edit orders will be rejected by Kraken's API if at least one of NewVolume()
+// or NewPrice() is not passed to arg 'options'
+//
+// Note: Field "userref" from parent order will not be retained on the new
+// order after edit. NewUserRef() must be passed to arg 'options' if a reference
+// ID associated with this order is still necessary.
+//
+// Note: Post-only flag is not retained from original order after
+// successful edit. Post-only needs to be explicitly set with NewPostOnly()
+// passed to arg 'options' on edit request.
 //
 // # Required Permissions:
 //
@@ -1471,9 +1488,79 @@ func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options 
 //
 // # Functional Options:
 //
-// func (kc *KrakenClient) EditOrder() (, error) {
-// 	return nil, nil
-// }
+//	// Field "userref" is an optional user-specified integer id associated with
+//	// edit request.
+//	//
+//	// Note: userref from parent order will not be retained on the new order after
+//	// edit.
+//	func NewUserRef(userRef string) EditOrderOption
+//
+//	// Updates order quantity in terms of the base asset.
+//	func NewVolume(volume string) EditOrderOption
+//
+//	// Used to edit an iceberg order, this is the visible order quantity in terms
+//	// of the base asset. The rest of the order will be hidden, although the full
+//	// volume can be filled at any time by any order of that size or larger that
+//	// matches in the order book. displayvol can only be used with the limit order
+//	// type, must be greater than 0, and less than volume.
+//	func NewDisplayVolume(displayVol string) EditOrderOption
+//
+//	// Updates limit price for "limit" orders. Updates trigger price for "stop-loss",
+//	// "stop-loss-limit", "take-profit", "take-profit-limit", "trailing-stop" and
+//	// "trailing-stop-limit" orders...
+//	func NewPrice(price string) EditOrderOption
+//
+//	// Updates limit price for "stop-loss-limit", "take-profit-limit" and
+//	// "trailing-stop-limit" orders...
+//	func NewPrice2(price2 string) EditOrderOption
+//
+//	// Post-only order (available when ordertype = limit). All the flags from the
+//	// parent order are retained except post-only. Post-only needs to be explicitly
+//	// mentioned on every edit request.
+//	func NewPostOnly() EditOrderOption
+//
+//	// RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+//	// engine should reject the new order request, in presence of latency or order
+//	// queueing. min now() + 2 seconds, max now() + 60 seconds.
+//	func NewDeadline(deadline string) EditOrderOption
+//
+//	// Used to interpret if client wants to receive pending replace, before the
+//	// order is completely replaced. Defaults to "false" if not called.
+//	func NewCancelResponse() EditOrderOption
+//
+//	// Validate inputs only. Do not submit order. Defaults to false if not called.
+//	func ValidateEditOrder() EditOrderOption
+//
+// # Example Usage:
+//
+//	editOrder, err := kc.EditOrder("OHYO67-6LP66-HMQ437", "XXBTZUSD", krakenspot.NewVolume("2.1234"), krakenspot.NewPostOnly(), krakenspot.NewPrice("45000.1"), krakenspot.ValidateEditOrder())
+func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption) (*data.EditOrderResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("txid", txID)
+	payload.Add("pair", pair)
+	for _, option := range options {
+		option(payload)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"EditOrder", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var editOrder data.EditOrderResp
+	err = processPrivateApiResponse(res, &editOrder)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &editOrder, nil
+}
 
 // TODO finish implementation checklist
 // Calls Kraken API private Trading "CancelOrder" endpoint.

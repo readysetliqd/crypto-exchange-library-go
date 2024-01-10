@@ -585,6 +585,24 @@ type BatchOrderDescription struct {
 	OrderDescription string `json:"order"`
 }
 
+type EditOrderResp struct {
+	Description        EditOrderDescription `json:"descr"`
+	NewTxID            string               `json:"txid"`
+	Volume             string               `json:"volume"`
+	Price              string               `json:"price"`
+	Price2             string               `json:"price2"`
+	NewUserRef         int                  `json:"newuserref"`
+	OldUserRef         int                  `json:"olduserref"`
+	NumOrdersCancelled uint8                `json:"orders_cancelled"`
+	OldTxID            string               `json:"originaltxid"`
+	Status             string               `json:"status"`
+	ErrorMessage       string               `json:"error_message"`
+}
+
+type EditOrderDescription struct {
+	OrderDescription string `json:"order"`
+}
+
 // #endregion
 
 // #region Private Funding Data structs

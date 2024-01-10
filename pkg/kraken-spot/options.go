@@ -1027,6 +1027,108 @@ func ValidateAddOrderBatch() AddOrderBatchOption {
 	}
 }
 
+type EditOrderOption func(payload url.Values)
+
+// Field "userref" is an optional user-specified integer id associated with
+// edit request.
+//
+// Note: userref from parent order will not be retained on the new order after
+// edit.
+func NewUserRef(userRef string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("userref", userRef)
+	}
+}
+
+// Updates order quantity in terms of the base asset.
+func NewVolume(volume string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("volume", volume)
+	}
+}
+
+// Used to edit an iceberg order, this is the visible order quantity in terms
+// of the base asset. The rest of the order will be hidden, although the full
+// volume can be filled at any time by any order of that size or larger that
+// matches in the order book. displayvol can only be used with the limit order
+// type, must be greater than 0, and less than volume.
+func NewDisplayVolume(displayVol string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("displayvol", displayVol)
+	}
+}
+
+// Updates limit price for "limit" orders. Updates trigger price for "stop-loss",
+// "stop-loss-limit", "take-profit", "take-profit-limit", "trailing-stop" and
+// "trailing-stop-limit" orders
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+//
+// Trailing Stops: Required arg 'price' must use a relative price for this field,
+// namely the + prefix, from which the direction will be automatic based on if
+// the original order is a buy or sell (no need to use - or #). The % suffix
+// also works for these order types to use a relative percentage price.
+func NewPrice(price string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("price", price)
+	}
+}
+
+// Updates limit price for "stop-loss-limit", "take-profit-limit" and
+// "trailing-stop-limit" orders
+//
+// Trailing Stops Note: In practice, the system will accept either relative or
+// specific (without + or -) for arg 'price2' despite what the docs say. The
+// note is included here just in case; Kraken API docs: Must use a relative
+// price for this field, namely one of the + or - prefixes. This will provide
+// the offset from the trigger price to the limit price, i.e. +0 would set the
+// limit price equal to the trigger price. The % suffix also works for this
+// field to use a relative percentage limit price.
+func NewPrice2(price2 string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("price2", price2)
+	}
+}
+
+// Post-only order (available when ordertype = limit). All the flags from the
+// parent order are retained except post-only. Post-only needs to be explicitly
+// mentioned on every edit request.
+func NewPostOnly() EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("oflags", "post")
+	}
+}
+
+// RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+// engine should reject the new order request, in presence of latency or order
+// queueing. min now() + 2 seconds, max now() + 60 seconds.
+func NewDeadline(deadline string) EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("deadline", deadline)
+	}
+}
+
+// Used to interpret if client wants to receive pending replace, before the
+// order is completely replaced. Defaults to "false" if not called.
+func NewCancelResponse() EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("cancel_response", "true")
+	}
+}
+
+// Validate inputs only. Do not submit order. Defaults to false if not called.
+func ValidateEditOrder() EditOrderOption {
+	return func(payload url.Values) {
+		payload.Add("validate", "true")
+	}
+}
+
 // #endregion
 
 // #region Private Funding endpoints functional options
