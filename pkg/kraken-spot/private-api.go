@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
@@ -23,22 +24,41 @@ import (
 var sharedClient = &http.Client{}
 
 type KrakenClient struct {
-	APIKey    string
-	APISecret []byte
-	Client    *http.Client
+	APIKey          string
+	APISecret       []byte
+	Client          *http.Client
+	HandleRateLimit bool
+	APICounter      uint8
+	MaxAPICounter   uint8
+	APICounterDecay uint8
+	Mutex           sync.Mutex
+	Cond            *sync.Cond
 }
 
+// TODO document inputs and enums
 // Creates new authenticated client KrakenClient for Kraken API
-func NewKrakenClient(apiKey, apiSecret string) (*KrakenClient, error) {
+func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRateLimit bool) (*KrakenClient, error) {
 	decodedSecret, err := base64.StdEncoding.DecodeString(apiSecret)
 	if err != nil {
 		return nil, err
 	}
-	return &KrakenClient{
-		APIKey:    apiKey,
-		APISecret: decodedSecret,
-		Client:    sharedClient,
-	}, nil
+	decayRate, ok := decayRateMap[verificationTier]
+	if !ok {
+		err = fmt.Errorf("invalid verification tier, check enum and inputs and try again")
+		return nil, err
+	}
+	kc := &KrakenClient{
+		APIKey:          apiKey,
+		APISecret:       decodedSecret,
+		Client:          sharedClient,
+		HandleRateLimit: handleRateLimit,
+		APICounterDecay: decayRate,
+	}
+	if handleRateLimit {
+		go kc.startRateLimiter()
+		kc.Cond = sync.NewCond(&kc.Mutex)
+	}
+	return kc, nil
 }
 
 // #endregion
@@ -98,6 +118,38 @@ func processPrivateApiResponse(res *http.Response, target interface{}) error {
 	}
 }
 
+// A go func method with a timer that decays kc.APICounter every second by the
+// amount in kc.APICounterDecay. Stops at 0.
+func (kc *KrakenClient) startRateLimiter() {
+	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
+	defer ticker.Stop()
+	for range ticker.C {
+		kc.Mutex.Lock()
+		if kc.APICounter > 0 {
+			kc.APICounter -= 1
+		}
+		kc.Mutex.Unlock()
+		kc.Cond.Broadcast()
+	}
+}
+
+// If HandleRateLimit is true, checks rate limit increment won't exceed max
+// counter cap. If it will, waits for counter to decrement before proceeding
+func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
+	if kc.HandleRateLimit {
+		kc.Mutex.Lock()
+		for kc.APICounter+1 >= kc.MaxAPICounter {
+			kc.Cond.Wait()
+		}
+		kc.APICounter += incrementAmount
+		kc.Mutex.Unlock()
+	}
+}
+
+// #endregion
+
+// #region Public Market Data endpoints
+// TODO copy public endpoints as methods for authenticated access
 // #endregion
 
 // #region Authenticated Account Data endpoints
@@ -111,6 +163,7 @@ func processPrivateApiResponse(res *http.Response, target interface{}) error {
 func (kc *KrakenClient) GetAccountBalances() (*map[string]string, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Balance", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -152,6 +205,8 @@ func (kc *KrakenClient) TotalUSDBalance() (float64, error) {
 func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"BalanceEx", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -277,6 +332,7 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 		}
 		payload.Add("asset", asset[0])
 	}
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"TradeBalance", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -322,6 +378,7 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 	}
 
 	// Send Request to Kraken API
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -356,6 +413,7 @@ func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]data.Orde
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 
 	// Send Request to Kraken API
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -398,6 +456,7 @@ func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 
 	// Send Request to Kraken API
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -413,6 +472,7 @@ func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
 		return nil, err
 	}
 
+	// Build slice
 	var pairOpenTxIDs []string
 	for txID, order := range openOrders.OpenOrders {
 		if order.Description.Pair == pair {
@@ -476,6 +536,7 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 	}
 
 	// Send Request to Kraken API
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"ClosedOrders", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -529,6 +590,7 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 	}
 
 	// Send request
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"QueryOrders", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -594,6 +656,7 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 	}
 
 	// Send request
+	kc.rateLimitAndIncrement(2)
 	res, err := kc.doRequest(privatePrefix+"TradesHistory", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -639,6 +702,7 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"QueryTrades", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -684,6 +748,7 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"OpenPositions", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -731,6 +796,7 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"OpenPositions", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -802,6 +868,7 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(2)
 	res, err := kc.doRequest(privatePrefix+"Ledgers", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -847,6 +914,7 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"QueryLedgers", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -892,6 +960,7 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"TradeVolume", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -958,6 +1027,7 @@ func (kc *KrakenClient) RequestTradesExportReport(description string, options ..
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"AddExport", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1030,6 +1100,7 @@ func (kc *KrakenClient) RequestLedgersExportReport(description string, options .
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"AddExport", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1087,6 +1158,7 @@ func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.Export
 	payload.Add("report", reportType)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"ExportStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1124,6 +1196,7 @@ func (kc *KrakenClient) RetrieveDataExport(reportID string, path ...string) erro
 	payload.Add("id", reportID)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"RetrieveExport", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1187,6 +1260,7 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 	payload.Add("type", requestType)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"RemoveExport", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1768,7 +1842,6 @@ func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAft
 	return &cancelAfter, nil
 }
 
-// TODO finish implementation checklist
 // Calls Kraken API private Trading "CancelOrderBatch" endpoint. Cancels
 // multiple open orders by txid or userref passed as a slice to arg 'txIDs'
 // (maximum 50 total unique IDs/references)
@@ -1871,6 +1944,7 @@ func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMet
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"DepositMethods", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1919,6 +1993,7 @@ func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"DepositAddresses", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -1981,6 +2056,7 @@ func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2054,6 +2130,7 @@ func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusP
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2101,6 +2178,7 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 	payload.Add("cursor", cursor)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"DepositStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2154,6 +2232,7 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawMethods", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2212,6 +2291,7 @@ func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddresses
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawAddresses", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2250,6 +2330,7 @@ func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount strin
 	payload.Add("amount", amount)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawInfo", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2301,6 +2382,7 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Withdraw", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2361,6 +2443,7 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2435,6 +2518,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsS
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2483,6 +2567,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.Wit
 	payload.Add("cursor", cursor)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2519,6 +2604,7 @@ func (kc *KrakenClient) CancelWithdrawal(asset string, refID string) error {
 	payload.Add("refid", refID)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WithdrawCancel", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2562,6 +2648,7 @@ func (kc *KrakenClient) TransferToFutures(asset string, amount string) (string, 
 	payload.Add("from", "Spot Wallet")
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"WalletTransfer", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2605,6 +2692,7 @@ func (kc *KrakenClient) CreateSubaccount(username string, email string) error {
 	payload.Add("email", email)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"CreateSubaccount", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2651,6 +2739,7 @@ func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount
 	payload.Add("toAccount", toAccount)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"AccountTransfer", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2699,6 +2788,7 @@ func (kc *KrakenClient) AllocateEarnFunds(strategyID string, amount string) erro
 	payload.Add("amount", amount)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/Allocate", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2747,6 +2837,7 @@ func (kc *KrakenClient) DeallocateEarnFunds(strategyID string, amount string) er
 	payload.Add("amount", amount)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/Deallocate", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2789,6 +2880,7 @@ func (kc *KrakenClient) AllocationStatus(strategyID string) (bool, error) {
 	payload.Add("strategy_id", strategyID)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/AllocateStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2827,6 +2919,7 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 	payload.Add("strategy_id", strategyID)
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/DeallocateStatus", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2903,6 +2996,7 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/Strategies", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2956,6 +3050,7 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 	}
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"Earn/Allocations", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
@@ -2997,6 +3092,7 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 
 	// Send request to server
+	kc.rateLimitAndIncrement(1)
 	res, err := kc.doRequest(privatePrefix+"GetWebSocketsToken", payload)
 	if err != nil {
 		err = fmt.Errorf("error sending request to server | %w", err)
