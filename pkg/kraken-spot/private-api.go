@@ -265,6 +265,7 @@ func (kc *KrakenClient) AvailableUSDBalance() (float64, error) {
 // # Required Permissions:
 //
 // Funding Permissions - Query;
+//
 // Order and Trades - Query open orders & trades
 func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, error) {
 	payload := url.Values{}
@@ -301,14 +302,12 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 //
 // # Functional Options:
 //
-// // Whether or not to include trades related to position in output. Defaults
-// to false if not called
-//
+//	// Whether or not to include trades related to position in output. Defaults
+//	// to false if not called
 //	func OOWithTrades(trades bool) GetOpenOrdersOption
 //
-// // Restrict results to given user reference id. Defaults to no restrictions
-// if not called
-//
+//	// Restrict results to given user reference id. Defaults to no restrictions
+//	// if not called
 //	func OOWithUserRef(userRef int) GetOpenOrdersOption
 //
 // # Example Usage:
@@ -350,42 +349,35 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 //
 // # Functional Options:
 //
-// // Whether or not to include trades related to position in output. Defaults
-// to false if not called
-//
+//	// Whether or not to include trades related to position in output. Defaults
+//	// to false if not called
 //	func COWithTrades(trades bool) GetClosedOrdersOption
 //
-// // Restrict results to given user reference id. Defaults to no restrictions
-// if not called
-//
+//	// Restrict results to given user reference id. Defaults to no restrictions
+//	// if not called
 //	func COWithUserRef(userRef int) GetClosedOrdersOption
 //
-// // Starting unix timestamp or order tx ID of results (exclusive). If an order's
-// tx ID is given for start or end time, the order's opening time (opentm) is used.
-// Defaults to show most recent orders if not called
-//
+//	// Starting unix timestamp or order tx ID of results (exclusive). If an order's
+//	// tx ID is given for start or end time, the order's opening time (opentm) is used.
+//	// Defaults to show most recent orders if not called
 //	func COWithStart(start int) GetClosedOrdersOption
 //
-// // Ending unix timestamp or order tx ID of results (exclusive). If an order's
-// tx ID is given for start or end time, the order's opening time (opentm) is used
-// Defaults to show most recent orders if not called
-//
+//	// Ending unix timestamp or order tx ID of results (exclusive). If an order's
+//	// tx ID is given for start or end time, the order's opening time (opentm) is used
+//	// Defaults to show most recent orders if not called
 //	func COWithEnd(end int) GetClosedOrdersOption
 //
-// // Result offset for pagination. Defaults to no offset if not called
-//
+//	// Result offset for pagination. Defaults to no offset if not called
 //	func COWithOffset(offset int) GetClosedOrdersOption
 //
-// // Which time to use to search and filter results for COWithStart() and COWithEnd()
-// Defaults to "both" if not called or invalid arg 'closeTime' passed
-//
-// // Enum: "open", "close", "both"
-//
+//	// Which time to use to search and filter results for COWithStart() and COWithEnd()
+//	// Defaults to "both" if not called or invalid arg 'closeTime' passed
+//	//
+//	// Enum: "open", "close", "both"
 //	func COWithCloseTime(closeTime string) GetClosedOrdersOption
 //
-// // Whether or not to consolidate trades by individual taker trades. Defaults to
-// true if not called
-//
+//	// Whether or not to consolidate trades by individual taker trades. Defaults to
+//	// true if not called
 //	func COWithConsolidateTaker(consolidateTaker bool) GetClosedOrdersOption
 //
 // # Example Usage:
@@ -428,19 +420,16 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 //
 // # Functional Options:
 //
-// // Whether or not to include trades related to position in output. Defaults
-// to false if not called
-//
+//	// Whether or not to include trades related to position in output. Defaults
+//	// to false if not called
 //	func OIWithTrades(trades bool) GetOrdersInfoOptions
 //
-// // Restrict results to given user reference id. Defaults to no restrictions
-// if not called
-//
+//	// Restrict results to given user reference id. Defaults to no restrictions
+//	// if not called
 //	func OIWithUserRef(userRef int) GetOrdersInfoOptions
 //
-// // Whether or not to consolidate trades by individual taker trades. Defaults to
-// true if not called
-//
+//	// Whether or not to consolidate trades by individual taker trades. Defaults to
+//	// true if not called
 //	func OIWithConsolidateTaker(consolidateTaker bool)
 //
 // Example usage:
@@ -483,37 +472,31 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 //
 // # Functional Options:
 //
-// // Type of trade. Defaults to "all" if not called or invalid 'tradeType' passed.
-//
-// // Enum: "all", "any position", "closed position", "closing position", "no position"
-//
+//	// Type of trade. Defaults to "all" if not called or invalid 'tradeType' passed.
+//	//
+//	// Enum: "all", "any position", "closed position", "closing position", "no position"
 //	func THWithType(tradeType string) GetTradesHistoryOptions
 //
-// // Whether or not to include trades related to position in output. Defaults
-// to false if not called
-//
+//	// Whether or not to include trades related to position in output. Defaults
+//	// to false if not called
 //	func THWithTrades(trades bool) GetTradesHistoryOptions
 //
-// // Starting unix timestamp or order tx ID of results (exclusive). If an order's
-// tx ID is given for start or end time, the order's opening time (opentm) is used.
-// Defaults to show most recent orders if not called
-//
+//	// Starting unix timestamp or order tx ID of results (exclusive). If an order's
+//	// tx ID is given for start or end time, the order's opening time (opentm) is used.
+//	// Defaults to show most recent orders if not called
 //	func THWithStart(start int) GetTradesHistoryOptions
 //
-// // Ending unix timestamp or order tx ID of results (exclusive). If an order's
-// tx ID is given for start or end time, the order's opening time (opentm) is used
-// Defaults to show most recent orders if not called
-//
+//	// Ending unix timestamp or order tx ID of results (exclusive). If an order's
+//	// tx ID is given for start or end time, the order's opening time (opentm) is used
+//	// Defaults to show most recent orders if not called
 //	func THWithEnd(end int) GetTradesHistoryOptions
 //
-// // Result offset for pagination. Defaults to no offset if not called
-//
+//	// Result offset for pagination. Defaults to no offset if not called
 //	func THWithOffset(offset int) GetTradesHistoryOptions
 //
-// // Whether or not to consolidate trades by individual taker trades. Defaults to
-// true if not called
-//
-//	func THWithConsolidateTaker(consolidateTaker bool)
+//	// Whether or not to consolidate trades by individual taker trades. Defaults to
+//	// true if not called
+//	func THWithConsolidateTaker(consolidateTaker bool) GetTradesHistoryOptions
 //
 // # Example Usage:
 //
@@ -555,10 +538,9 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 //
 // # Functional Options:
 //
-// // Whether or not to include trades related to position in output. Defaults
-// to false if not called
-//
-//	func TIWithTrades(trades bool)
+//	// Whether or not to include trades related to position in output. Defaults
+//	// to false if not called
+//	func TIWithTrades(trades bool) GetTradeInfoOption
 //
 // # Example Usage:
 //
@@ -599,13 +581,11 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 //
 // # Functional Options:
 //
-// // Comma delimited list of txids to limit output to. Defaults to show all open
-// positions if not called
-//
+//	// Comma delimited list of txids to limit output to. Defaults to show all open
+//	// positions if not called
 //	func OPWithTxID(txID string) GetOpenPositionsOption
 //
-// // Whether to include P&L calculations. Defaults to false if not called
-//
+//	// Whether to include P&L calculations. Defaults to false if not called
 //	func OPWithDoCalcs(doCalcs bool) GetOpenPositionsOption
 //
 // # Example Usage:
@@ -647,13 +627,11 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 //
 // # Functional Options:
 //
-// // Comma delimited list of txids to limit output to. Defaults to show all open
-// positions if not called
-//
+//	// Comma delimited list of txids to limit output to. Defaults to show all open
+//	// positions if not called
 //	func OPCWithTxID(txID string) GetOpenPositionsOption
 //
-// // Whether to include P&L calculations. Defaults to false if not called
-//
+//	// Whether to include P&L calculations. Defaults to false if not called
 //	func OPCWithDoCalcs(doCalcs bool) GetOpenPositionsOption
 //
 // # Example Usage:
@@ -696,43 +674,36 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 //
 // # Functional Options:
 //
-// // Filter output by asset or comma delimited list of assets. Defaults to "all"
-// if not called.
-//
+//	// Filter output by asset or comma delimited list of assets. Defaults to "all"
+//	// if not called.
 //	func LIWithAsset(asset string) GetLedgersInfoOption
 //
-// // Filter output by asset class. Defaults to "currency" if not called
-// //
-// // Enum: "currency", ...?
-//
+//	// Filter output by asset class. Defaults to "currency" if not called
+//	//
+//	// Enum: "currency", ...?
 //	func LIWithAclass(aclass string) GetLedgersInfoOption
 //
-// // Type of ledger to retrieve. Defaults to "all" if not called or invalid
-// 'ledgerType' passed.
-//
-// // Enum: "all", "trade", "deposit", "withdrawal", "transfer", "margin", "adjustment",
-// "rollover", "credit", "settled", "staking", "dividend", "sale", "nft_rebate"
-//
+//	// Type of ledger to retrieve. Defaults to "all" if not called or invalid
+//	// 'ledgerType' passed.
+//	//
+//	// Enum: "all", "trade", "deposit", "withdrawal", "transfer", "margin", "adjustment",
+//	// "rollover", "credit", "settled", "staking", "dividend", "sale", "nft_rebate"
 //	func LIWithType(ledgerType string) GetLedgersInfoOption
 //
-// // Starting unix timestamp or ledger ID of results (exclusive). Defaults to most
-// recent ledgers if not called.
-//
+//	// Starting unix timestamp or ledger ID of results (exclusive). Defaults to most
+//	// recent ledgers if not called.
 //	func LIWithStart(start int) GetLedgersInfoOption
 //
-// // Ending unix timestamp or ledger ID of results (inclusive). Defaults to most
-// recent ledgers if not called.
-//
+//	// Ending unix timestamp or ledger ID of results (inclusive). Defaults to most
+//	// recent ledgers if not called.
 //	func LIWithEnd(end int) GetLedgersInfoOption
 //
-// // Result offset for pagination. Defaults to no offset if not called.
-//
+//	// Result offset for pagination. Defaults to no offset if not called.
 //	func LIWithOffset(offset int) GetLedgersInfoOption
 //
-// // If true, does not retrieve count of ledger entries. Request can be noticeably
-// faster for users with many ledger entries as this avoids an extra database query.
-// Defaults to false if not called.
-//
+//	// If true, does not retrieve count of ledger entries. Request can be noticeably
+//	// faster for users with many ledger entries as this avoids an extra database query.
+//	// Defaults to false if not called.
 //	func LIWithoutCount(withoutCount bool) GetLedgersInfoOption
 //
 // # Example Usage:
@@ -775,9 +746,8 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 //
 // # Functional Options:
 //
-// // Whether or not to include trades related to position in output. Defaults to
-// false if not called.
-//
+//	// Whether or not to include trades related to position in output. Defaults to
+//	// false if not called.
 //	func GLWithTrades(trades bool) GetLedgerOption
 //
 // # Example Usage:
@@ -822,9 +792,8 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 //
 // # Functional Options:
 //
-// // Comma delimited list of asset pairs to get fee info on. Defaults to show none
-// if not called.
-//
+//	// Comma delimited list of asset pairs to get fee info on. Defaults to show none
+//	// if not called.
 //	func TVWithPair(pair string) GetTradeVolumeOption
 //
 // # Example Usage:
@@ -869,30 +838,26 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 //
 // # Functional Options:
 //
-// // File format to export. Defaults to "CSV" if not called or invalid value
-// passed to arg 'format'
-//
-// // Enum: "CSV", "TSV"
-//
+//	// File format to export. Defaults to "CSV" if not called or invalid value
+//	// passed to arg 'format'
+//	//
+//	// Enum: "CSV", "TSV"
 //	func RTWithFormat(format string) RequestTradesExportReportOption
 //
-// // Accepts comma-delimited list of fields passed as a single string to include
-// in report. Defaults to "all" if not called. API will return error:
-// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
-// no validation checks for passed value to 'fields'
-//
-// // Enum: "ordertxid", "time", "ordertype", "price", "cost", "fee", "vol",
-// "margin", "misc", "ledgers"
-//
+//	// Accepts comma-delimited list of fields passed as a single string to include
+//	// in report. Defaults to "all" if not called. API will return error:
+//	// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+//	// no validation checks for passed value to 'fields'
+//	//
+//	// Enum: "ordertxid", "time", "ordertype", "price", "cost", "fee", "vol",
+//	// "margin", "misc", "ledgers"
 //	func RTWithFields(fields string) RequestTradesExportReportOption
 //
-// // UNIX timestamp for report start time. Defaults to 1st of the current month
-// if not called
-//
+//	// UNIX timestamp for report start time. Defaults to 1st of the current month
+//	// if not called
 //	func RTWithStart(start int) RequestTradesExportReportOption
 //
-// // UNIX timestamp for report end time. Defaults to current time if not called
-//
+//	// UNIX timestamp for report end time. Defaults to current time if not called
 //	func RTWithEnd(end int) RequestTradesExportReportOption
 //
 // # Example Usage:
@@ -945,30 +910,26 @@ func (kc *KrakenClient) RequestTradesExportReport(description string, options ..
 //
 // # Functional Options:
 //
-// // File format to export. Defaults to "CSV" if not called or invalid value
-// passed to arg 'format'
-//
-// // Enum: "CSV", "TSV"
-//
+//	// File format to export. Defaults to "CSV" if not called or invalid value
+//	// passed to arg 'format'
+//	//
+//	// Enum: "CSV", "TSV"
 //	func RLWithFormat(format string) RequestLedgersExportReportOption
 //
-// // Accepts comma-delimited list of fields passed as a single string to include
-// in report. Defaults to "all" if not called. API will return error:
-// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
-// no validation checks for passed value to 'fields'
-//
-// // Enum: "refid", "time", "type", "aclass", "asset",
-// "amount", "fee", "balance"
-//
+//	// Accepts comma-delimited list of fields passed as a single string to include
+//	// in report. Defaults to "all" if not called. API will return error:
+//	// [EGeneral:Internal error] if invalid value passed to arg 'fields'. Function has
+//	// no validation checks for passed value to 'fields'
+//	//
+//	// Enum: "refid", "time", "type", "aclass", "asset",
+//	// "amount", "fee", "balance"
 //	func RLWithFields(fields string) RequestLedgersExportReportOption
 //
-// // UNIX timestamp for report start time. Defaults to 1st of the current month
-// if not called
-//
+//	// UNIX timestamp for report start time. Defaults to 1st of the current month
+//	// if not called
 //	func RLWithStart(start int) RequestLedgersExportReportOption
 //
-// // UNIX timestamp for report end time. Defaults to current time if not called
-//
+//	// UNIX timestamp for report end time. Defaults to current time if not called
 //	func RLWithEnd(end int) RequestLedgersExportReportOption
 //
 // # Example Usage:
@@ -1204,47 +1165,38 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 // Note: See options.go for complete docstrings with applicable general notes
 // for each order type function.
 //
-// // Instantly market orders in at best current prices
-//
+//	// Instantly market orders in at best current prices
 //	func Market() OrderType
 //
-// // Order type of "limit" where arg 'price' is the level at which the limit order
-// will be placed...
-//
+//	// Order type of "limit" where arg 'price' is the level at which the limit order
+//	// will be placed...
 //	func Limit(price string) OrderType
 //
-// // Order type of "stop-loss" order type where arg 'price' is the stop loss
-// trigger price...
-//
+//	// Order type of "stop-loss" order type where arg 'price' is the stop loss
+//	// trigger price...
 //	func StopLoss(price string) OrderType
 //
-// // Order type of "take-profit" where arg 'price' is the take profit trigger price...
-//
+//	// Order type of "take-profit" where arg 'price' is the take profit trigger price...
 //	func TakeProfit(price string) OrderType
 //
-// // Order type of "stop-loss-limit" where arg 'price' is the stop loss trigger
-// price and arg 'price2' is the limit order that will be placed...
-//
+//	// Order type of "stop-loss-limit" where arg 'price' is the stop loss trigger
+//	// price and arg 'price2' is the limit order that will be placed...
 //	func StopLossLimit(price, price2 string) OrderType
 //
-// // Order type of "take-profit-limit" where arg 'price' is the take profit trigger
-// price and arg 'price2' is the limit order that will be placed...
-//
+//	// Order type of "take-profit-limit" where arg 'price' is the take profit trigger
+//	// price and arg 'price2' is the limit order that will be placed...
 //	func TakeProfitLimit(price, price2 string) OrderType
 //
-// // Order type of "trailing-stop" where arg 'price' is the relative stop trigger
-// price...
-//
+//	// Order type of "trailing-stop" where arg 'price' is the relative stop trigger
+//	// price...
 //	func TrailingStop(price string) OrderType
 //
-// // Order type of "trailing-stop-limit" where arg 'price' is the relative stop
-// trigger price and arg 'price2' is the limit order that will be placed...
-//
+//	// Order type of "trailing-stop-limit" where arg 'price' is the relative stop
+//	// trigger price and arg 'price2' is the limit order that will be placed...
 //	func TrailingStopLimit(price, price2 string) OrderType
 //
-// // Order type of "settle-position". Settles any open margin position of same
-// 'direction' and 'pair' by amount 'volume'...
-//
+//	// Order type of "settle-position". Settles any open margin position of same
+//	// 'direction' and 'pair' by amount 'volume'...
 //	func SettlePosition(leverage string)
 //
 // # Functional Options:
@@ -1252,174 +1204,151 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 // Note: See options.go for complete docstrings with further notes on some functions
 // and applicable general notes for each close order type function.
 //
-// // User reference id 'userref' is an optional user-specified integer id that
-// can be associated with any number of orders. Many clients choose a userref
-// corresponding to a unique integer id generated by their systems (e.g. a
-// timestamp). However, because we don't enforce uniqueness on our side, it
-// can also be used to easily group orders by pair, side, strategy, etc. This
-// allows clients to more readily cancel or query information about orders in
-// a particular group, with fewer API calls by using userref instead of our
-// txid, where supported.
-//
+//	// User reference id 'userref' is an optional user-specified integer id that
+//	// can be associated with any number of orders. Many clients choose a userref
+//	// corresponding to a unique integer id generated by their systems (e.g. a
+//	// timestamp). However, because we don't enforce uniqueness on our side, it
+//	// can also be used to easily group orders by pair, side, strategy, etc. This
+//	// allows clients to more readily cancel or query information about orders in
+//	// a particular group, with fewer API calls by using userref instead of our
+//	// txid, where supported.
 //	func UserRef(userRef string) AddOrderOption
 //
-// // Used to create an iceberg order, this is the visible order quantity in terms
-// of the base asset. The rest of the order will be hidden, although the full
-// volume can be filled at any time by any order of that size or larger that
-// matches in the order book. DisplayVolume() can only be used with the Limit()
-// order type. Must be greater than 0, and less than AddOrder() arg 'volume'.
-//
+//	// Used to create an iceberg order, this is the visible order quantity in terms
+//	// of the base asset. The rest of the order will be hidden, although the full
+//	// volume can be filled at any time by any order of that size or larger that
+//	// matches in the order book. DisplayVolume() can only be used with the Limit()
+//	// order type. Must be greater than 0, and less than AddOrder() arg 'volume'.
 //	func DisplayVolume(displayVol string) AddOrderOption
 //
-// // Price signal used to trigger stop-loss, stop-loss-limit, take-profit,
-// take-profit-limit, trailing-stop and trailing-stop-limit orders. Defaults to
-// "last" trigger type if not called. Calling this function overrides default to
-// "index".
-//
-// // Note: This trigger type will also be used for any associated conditional
-// close orders.
-//
-// // Note: To keep triggers serviceable, the last price will be used as fallback
-// reference price during connectivity issues with external index feeds.
-//
+//	// Price signal used to trigger stop-loss, stop-loss-limit, take-profit,
+//	// take-profit-limit, trailing-stop and trailing-stop-limit orders. Defaults to
+//	// "last" trigger type if not called. Calling this function overrides default to
+//	// "index".
+//	//
+//	// Note: This trigger type will also be used for any associated conditional
+//	// close orders.
+//	//
+//	// Note: To keep triggers serviceable, the last price will be used as fallback
+//	// reference price during connectivity issues with external index feeds.
 //	func IndexTrigger() AddOrderOption
 //
-// // Amount of leverage desired. Defaults to no leverage if function is not called.
-// API accepts string of any number; in practice, must be some integer >= 2...
-//
+//	// Amount of leverage desired. Defaults to no leverage if function is not called.
+//	// API accepts string of any number; in practice, must be some integer >= 2...
 //	func Leverage(leverage string) AddOrderOption
 //
-// // If true, order will only reduce a currently open position, not increase it
-// or open a new position. Defaults to false if not passed.
-//
-// // Note: ReduceOnly() is only usable with leveraged orders. This includes orders
-// of 'orderType' SettlePosition() and orders with Leverage() passed to 'options'
-//
+//	// If true, order will only reduce a currently open position, not increase it
+//	// or open a new position. Defaults to false if not passed.
+//	//
+//	// Note: ReduceOnly() is only usable with leveraged orders. This includes orders
+//	// of 'orderType' SettlePosition() and orders with Leverage() passed to 'options'
 //	func ReduceOnly() AddOrderOption
 //
-// // Sets self trade behavior to "cancel-oldest". Overrides default value when called.
-// Default "cancel-newest"...
-//
-// // CAUTION: Mutually exclusive with STPCancelBoth()
-//
+//	// Sets self trade behavior to "cancel-oldest". Overrides default value when called.
+//	// Default "cancel-newest"...
+//	//
+//	// CAUTION: Mutually exclusive with STPCancelBoth()
 //	func STPCancelOldest() AddOrderOption
 //
-// // Sets self trade behavior to "cancel-both". Overrides default value when called.
-// Default "cancel-newest"...
-//
-// // CAUTION: Mutually exclusive with STPCancelOldest()
-//
+//	// Sets self trade behavior to "cancel-both". Overrides default value when called.
+//	// Default "cancel-newest"...
+//	//
+//	// CAUTION: Mutually exclusive with STPCancelOldest()
 //	func STPCancelBoth() AddOrderOption
 //
-// // Post-only order (available when ordertype = limit)
-//
+//	// Post-only order (available when ordertype = limit)
 //	func PostOnly() AddOrderOption
 //
-// // Prefer fee in base currency (default if selling)
-//
-// // CAUTION: Mutually exclusive with FCIQ().
-//
+//	// Prefer fee in base currency (default if selling)
+//	//
+//	// CAUTION: Mutually exclusive with FCIQ().
 //	func FCIB() AddOrderOption
 //
-// // Prefer fee in quote currency (default if buying)
-//
-// // CAUTION: Mutually exclusive with FCIB().
-//
+//	// Prefer fee in quote currency (default if buying)
+//	//
+//	// CAUTION: Mutually exclusive with FCIB().
 //	func FCIQ() AddOrderOption
 //
-// // Disables market price protection for market orders
-//
+//	// Disables market price protection for market orders
 //	func NOMPP() AddOrderOption
 //
-// // Order volume expressed in quote currency. This is supported only for market orders.
-//
+//	// Order volume expressed in quote currency. This is supported only for market orders.
 //	func VIQC() AddOrderOption
 //
-// // Time-in-force of the order to specify how long it should remain in the order
-// book before being cancelled. Overrides default value with "IOC" (Immediate Or
-// Cancel). IOC will immediately execute the amount possible and cancel any
-// remaining balance rather than resting in the book. Defaults to "GTC" (Good
-// 'Til Canceled) if function is not called.
-//
-// // CAUTION: Mutually exclusive with GoodTilDate().
-//
+//	// Time-in-force of the order to specify how long it should remain in the order
+//	// book before being cancelled. Overrides default value with "IOC" (Immediate Or
+//	// Cancel). IOC will immediately execute the amount possible and cancel any
+//	// remaining balance rather than resting in the book. Defaults to "GTC" (Good
+//	// 'Til Canceled) if function is not called.
+//	//
+//	// CAUTION: Mutually exclusive with GoodTilDate().
 //	func ImmediateOrCancel() AddOrderOption
 //
-// // Time-in-force of the order to specify how long it should remain in the order
-// book before being cancelled. Overrides default value with "GTD" (Good Til Date).
-// GTD, if called, will cause the order to expire at specified unix time passed
-// to arg 'expireTime'. Expiration time, can be specified as an absolute timestamp
-// or as a number of seconds in the future...
-//
-// // CAUTION: Mutually exclusive with ImmediateOrCancel().
-//
+//	// Time-in-force of the order to specify how long it should remain in the order
+//	// book before being cancelled. Overrides default value with "GTD" (Good Til Date).
+//	// GTD, if called, will cause the order to expire at specified unix time passed
+//	// to arg 'expireTime'. Expiration time, can be specified as an absolute timestamp
+//	// or as a number of seconds in the future...
+//	//
+//	// CAUTION: Mutually exclusive with ImmediateOrCancel().
 //	func GoodTilDate(expireTime string) AddOrderOption
 //
 // // Conditional close of "limit" order type where arg 'price' is the level at which
 // the limit order will be placed...
 //
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseLimit(price string) AddOrderOption
 //
-// // Conditional close of "stop-loss" order type where arg 'price' is the stop
-// loss trigger price...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "stop-loss" order type where arg 'price' is the stop
+//	// loss trigger price...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseStopLoss(price string) AddOrderOption
 //
-// // Conditional close of "take-profit" order type where arg 'price' is the take
-// profit trigger price...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "take-profit" order type where arg 'price' is the take
+//	// profit trigger price...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseTakeProfit(price string) AddOrderOption
 //
-// // Conditional close of "stop-loss-limit" order type where arg 'price' is the
-// stop loss trigger price and arg 'price2' is the limit order that will be placed...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "stop-loss-limit" order type where arg 'price' is the
+//	// stop loss trigger price and arg 'price2' is the limit order that will be placed...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseStopLossLimit(price, price2 string) AddOrderOption
 //
-// // Conditional close of "take-profit-limit" order type where arg 'price' is the
-// take profit trigger price and arg 'price2' is the limit order that will be
-// placed...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "take-profit-limit" order type where arg 'price' is the
+//	// take profit trigger price and arg 'price2' is the limit order that will be
+//	// placed...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseTakeProfitLimit(price, price2 string) AddOrderOption
 //
-// // Conditional close of "trailing-stop" order type where arg 'price' is the relative
-// stop trigger price...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "trailing-stop" order type where arg 'price' is the relative
+//	// stop trigger price...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseTrailingStop(price string) AddOrderOption
 //
-// // Conditional close of "trailing-stop-limit" order type where arg 'price' is the
-// relative stop trigger price and arg 'price2' is the limit order that will be
-// placed...
-//
-// // CAUTION: Mutually exclusive with all conditional close orders with format
-// Close<orderType>()
-//
+//	// Conditional close of "trailing-stop-limit" order type where arg 'price' is the
+//	// relative stop trigger price and arg 'price2' is the limit order that will be
+//	// placed...
+//	//
+//	// CAUTION: Mutually exclusive with all conditional close orders with format
+//	// Close<orderType>()
 //	func CloseTrailingStopLimit(price, price2 string) AddOrderOption
 //
-// // Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
-// engine should reject the new order request to arg 'deadline'...
-//
+//	// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+//	// engine should reject the new order request to arg 'deadline'...
 //	func AddWithDeadline(deadline string) AddOrderOption
 //
-// // Validates inputs only. Do not submit order. Defaults to "false" if not called.
-//
+//	// Validates inputs only. Do not submit order. Defaults to "false" if not called.
 //	func ValidateAddOrder() AddOrderOption
 //
 // # Example Usage:
@@ -1476,14 +1405,12 @@ func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair st
 //
 //	// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
 //	// engine should reject the new order request to arg 'deadline'.
-//
+//	//
 //	// In presence of latency or order queueing: min now() + 2 seconds, max now() +
 //	// 60 seconds.
-//
 //	func AddBatchWithDeadline(deadline string) AddOrderBatchOption
 //
 //	// Validates inputs only. Do not submit order. Defaults to "false" if not called.
-//
 //	func ValidateAddOrderBatch() AddOrderBatchOption
 //
 // # Example Usage:
@@ -1668,13 +1595,11 @@ func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMet
 //
 // # Functional Options:
 //
-// // Whether or not to generate a new address. Defaults to false if function is
-// not called.
-//
+//	// Whether or not to generate a new address. Defaults to false if function is
+//	// not called.
 //	func DAWithNew() GetDepositAddressesOption
 //
-// // Amount you wish to deposit (only required for method=Bitcoin Lightning)
-//
+//	// Amount you wish to deposit (only required for method=Bitcoin Lightning)
 //	func DAWithAmount(amount string) GetDepositAddressesOption
 //
 // # Example Usage:
@@ -1719,26 +1644,21 @@ func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options
 //
 // # Functional Options:
 //
-// // Filter for specific asset being deposited
-//
+//	// Filter for specific asset being deposited
 //	func DSWithAsset(asset string) GetDepositsStatusOption
 //
-// // Filter for specific name of deposit method
-//
+//	// Filter for specific name of deposit method
 //	func DSWithMethod(method string) GetDepositsStatusOption
 //
-// // Start timestamp, deposits created strictly before will not be included in
-// the response
-//
+//	// Start timestamp, deposits created strictly before will not be included in
+//	// the response
 //	func DSWithStart(start string) GetDepositsStatusOption
 //
-// // End timestamp, deposits created strictly after will be not be included in
-// the response
-//
+//	// End timestamp, deposits created strictly after will be not be included in
+//	// the response
 //	func DSWithEnd(end string) GetDepositsStatusOption
 //
-// // Number of results to include per page
-//
+//	// Number of results to include per page
 //	func DSWithLimit(limit uint) GetDepositsStatusOption
 //
 // ~Filter asset class being deposited. Defaults to "currency" if function is
@@ -1786,26 +1706,21 @@ func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*
 //
 // # Functional Options:
 //
-// // Filter for specific asset being deposited
-//
+//	// Filter for specific asset being deposited
 //	func DPWithAsset(asset string) GetDepositsStatusPaginatedOption
 //
-// // Filter for specific name of deposit method
-//
+//	// Filter for specific name of deposit method
 //	func DPWithMethod(method string) GetDepositsStatusPaginatedOption
 //
-// // Start timestamp, deposits created strictly before will not be included in
-// the response
-//
+//	// Start timestamp, deposits created strictly before will not be included in
+//	// the response
 //	func DPWithStart(start string) GetDepositsStatusPaginatedOption
 //
-// // End timestamp, deposits created strictly after will be not be included in
-// the response
-//
+//	// End timestamp, deposits created strictly after will be not be included in
+//	// the response
 //	func DPWithEnd(end string) GetDepositsStatusPaginatedOption
 //
-// // Number of results to include per page
-//
+//	// Number of results to include per page
 //	func DPWithLimit(limit uint) GetDepositsStatusPaginatedOption
 //
 // ~Filter asset class being deposited. Defaults to "currency" if function is
@@ -1911,14 +1826,12 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 //
 // # Functional Options:
 //
-// // Filter methods for specific asset. Defaults to no filter if function is not
-// called
-//
+//	// Filter methods for specific asset. Defaults to no filter if function is not
+//	// called
 //	func WMWithAsset(asset string) GetWithdrawalMethodsOption
 //
-// // Filter methods for specific network. Defaults to no filter if function is not
-// called
-//
+//	// Filter methods for specific network. Defaults to no filter if function is not
+//	// called
 //	func WMWithNetwork(network string) GetWithdrawalMethodsOption
 //
 // ~// Filter asset class being withdrawn. Defaults to "currency" if function is
@@ -1966,22 +1879,18 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 //
 // # Functional Options:
 //
-// // Filter addresses for specific asset
-//
+//	// Filter addresses for specific asset
 //	func WAWithAsset(asset string) GetWithdrawalAddressesOption
 //
-// // Filter addresses for specific method
-//
+//	// Filter addresses for specific method
 //	func WAWithMethod(method string) GetWithdrawalAddressesOption
 //
-// // Find address for by withdrawal key name, as set up on your account
-//
+//	// Find address for by withdrawal key name, as set up on your account
 //	func WAWithKey(key string) GetWithdrawalAddressesOption
 //
-// // Filter by verification status of the withdrawal address. Withdrawal addresses
-// successfully completing email confirmation will have a verification status of
-// true.
-//
+//	// Filter by verification status of the withdrawal address. Withdrawal addresses
+//	// successfully completing email confirmation will have a verification status of
+//	// true.
 //	func WAWithVerified(verified bool) GetWithdrawalAddressesOption
 //
 // ~// Filter asset class being withdrawn. Defaults to "currency" if function is
@@ -2066,14 +1975,12 @@ func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount strin
 //
 // # Functional Options:
 //
-// // Optional, crypto address that can be used to confirm address matches key
-// (will return Invalid withdrawal address error if different)
-//
+//	// Optional, crypto address that can be used to confirm address matches key
+//	// (will return Invalid withdrawal address error if different)
 //	func WFWithAddress(address string) WithdrawFundsOption
 //
-// // Optional, if the processed withdrawal fee is higher than max_fee, withdrawal
-// will fail with EFunding:Max fee exceeded
-//
+//	// Optional, if the processed withdrawal fee is higher than max_fee, withdrawal
+//	// will fail with EFunding:Max fee exceeded
 //	func WFWithMaxFee(maxFee string) WithdrawFundsOption
 //
 // # Example Usage:
@@ -2120,22 +2027,18 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 //
 // # Functional Options:
 //
-// // Filter for specific asset being withdrawn
-//
+//	// Filter for specific asset being withdrawn
 //	func WSWithAsset(asset string) GetWithdrawalsStatusOption
 //
-// // Filter for specific name of withdrawal method
-//
+//	// Filter for specific name of withdrawal method
 //	func WSWithMethod(method string) GetWithdrawalsStatusOption
 //
-// // Start timestamp, withdrawals created strictly before will not be included in
-// the response
-//
+//	// Start timestamp, withdrawals created strictly before will not be included in
+//	// the response
 //	func WSWithStart(start string) GetWithdrawalsStatusOption
 //
-// // End timestamp, withdrawals created strictly after will be not be included in
-// the response
-//
+//	// End timestamp, withdrawals created strictly after will be not be included in
+//	// the response
 //	func WSWithEnd(end string) GetWithdrawalsStatusOption
 //
 // ~// Filter asset class being withdrawn. Defaults to "currency" if function is
@@ -2184,26 +2087,21 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 //
 // # Functional Options:
 //
-// // Filter for specific asset being withdrawn
-//
+//	// Filter for specific asset being withdrawn
 //	func WPWithAsset(asset string) GetWithdrawalsStatusPaginatedOption
 //
-// // Filter for specific name of withdrawal method
-//
+//	// Filter for specific name of withdrawal method
 //	func WPWithMethod(method string) GetWithdrawalsStatusPaginatedOption
 //
-// // Start timestamp, withdrawals created strictly before will not be included in
-// the response
-//
+//	// Start timestamp, withdrawals created strictly before will not be included in
+//	// the response
 //	func WPWithStart(start string) GetWithdrawalsStatusPaginatedOption
 //
-// // End timestamp, withdrawals created strictly after will be not be included in
-// the response
-//
+//	// End timestamp, withdrawals created strictly after will be not be included in
+//	// the response
 //	func WPWithEnd(end string) GetWithdrawalsStatusPaginatedOption
 //
-// // Number of results to include per page. Defaults to 500 if function is not called
-//
+//	// Number of results to include per page. Defaults to 500 if function is not called
 //	func WPWithLimit(limit int) GetWithdrawalsStatusPaginatedOption
 //
 // ~// Filter asset class being withdrawn. Defaults to "currency" if function is
@@ -2309,7 +2207,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.Wit
 //
 // # Example Usage:
 //
-// err := kc.CancelWithdrawal("XBT", "FTQcuak-V6Za8qrWnhzTx67yYHz8Tg")
+//	err := kc.CancelWithdrawal("XBT", "FTQcuak-V6Za8qrWnhzTx67yYHz8Tg")
 func (kc *KrakenClient) CancelWithdrawal(asset string, refID string) error {
 	// Build payload
 	payload := url.Values{}
@@ -2665,16 +2563,14 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 //
 // # Functional Options:
 //
-// // Filter strategies by asset name. Defaults to no filter if function not called
-//
+//	// Filter strategies by asset name. Defaults to no filter if function not called
 //	func ESWithAsset(asset string) GetEarnStrategiesOption
 //
-// // Filters displayed strategies by lock type. Accepts array of strings for arg
-// 'lockTypes' and ignores invalid values passed. Defaults to no filter if
-// function not called or only invalid values passed.
-//
-// // Enum - 'lockTypes': "flex", "bonded", "timed", "instant"
-//
+//	// Filters displayed strategies by lock type. Accepts array of strings for arg
+//	// 'lockTypes' and ignores invalid values passed. Defaults to no filter if
+//	// function not called or only invalid values passed.
+//	//
+//	// Enum - 'lockTypes': "flex", "bonded", "timed", "instant"
 //	func ESWithLockType(lockTypes []string) GetEarnStrategiesOption
 //
 // ~// Pass with arg 'ascending' set to true to sort strategies ascending. Defaults
@@ -2733,19 +2629,16 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 //
 // # Functional Options:
 //
-// // Pass with arg 'ascending' set to true to sort strategies ascending. Defaults
-// to false (descending) if function is not called
-//
+//	// Pass with arg 'ascending' set to true to sort strategies ascending. Defaults
+//	// to false (descending) if function is not called
 //	func EAWithAscending(ascending bool) GetEarnAllocationsOption
 //
-// // A secondary currency to express the value of your allocations. Defaults
-// to express value in USD if function is not called
-//
+//	// A secondary currency to express the value of your allocations. Defaults
+//	// to express value in USD if function is not called
 //	func EAWithConvertedAsset(asset string) GetEarnAllocationsOption
 //
-// // Omit entries for strategies that were used in the past but now they don't
-// hold any allocation. Defaults to false (don't omit) if function is not called
-//
+//	// Omit entries for strategies that were used in the past but now they don't
+//	// hold any allocation. Defaults to false (don't omit) if function is not called
 //	func EAWithHideZeroAllocations(hide bool) GetEarnAllocationsOption
 //
 // # Example Usage:

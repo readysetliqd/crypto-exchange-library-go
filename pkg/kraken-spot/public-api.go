@@ -460,7 +460,7 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 // current, not-yet-committed frame and will always be present, regardless of
 // the value of since.
 //
-// interval enum: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+// Enum - 'interval': 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
 func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
 	endpoint := fmt.Sprintf("OHLC?pair=%s&interval=%v", pair, interval)
 	OHLC := &data.OHLCResp{}
@@ -482,7 +482,7 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 // asks for arg 'pair'. Optional arg 'count' will return count number of each bids
 // and asks. Not passing an arg to 'count' will default to 100.
 //
-// 'count' enum: [1..500]
+// Enum - 'count': [1..500]
 func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 	var initialCapacity uint16
 	endpoint := fmt.Sprintf("Depth?pair=%s", pair)
@@ -513,7 +513,7 @@ func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 // recent trades for arg 'pair'. Accepts optional arg 'count' to get 'count'
 // number of recent trades. Not passing an arg to 'count' will default to 1000
 //
-// 'count' enum [1..1000]
+// Enum - 'count': [1..1000]
 func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
 	var initialCapacity uint16
 	endpoint := "Trades?pair=" + pair
@@ -544,7 +544,7 @@ func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
 // 'count' number of trades after 'since'. Not passing an arg to 'count' will
 // default to 1000
 //
-// 'count' enum [1..1000]
+// Enum - 'count': [1..1000]
 func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesResp, error) {
 	var initialCapacity uint16
 	endpoint := fmt.Sprintf("Trades?pair=%s&since=%v", pair, since)
