@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -47,11 +48,13 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		err = fmt.Errorf("invalid verification tier, check enum and inputs and try again")
 		return nil, err
 	}
+	maxCounter := maxCounterMap[verificationTier]
 	kc := &KrakenClient{
 		APIKey:          apiKey,
 		APISecret:       decodedSecret,
 		Client:          sharedClient,
 		HandleRateLimit: handleRateLimit,
+		MaxAPICounter:   maxCounter,
 		APICounterDecay: decayRate,
 	}
 	if handleRateLimit {
@@ -63,7 +66,7 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 
 // #endregion
 
-// #region Unexported KrakenClient methods
+// #region Unexported KrakenClient helper methods
 
 // Generates a signature for a request to the Kraken API
 func (kc *KrakenClient) getSignature(urlPath string, values url.Values) string {
@@ -139,6 +142,7 @@ func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 	if kc.HandleRateLimit {
 		kc.Mutex.Lock()
 		for kc.APICounter+1 >= kc.MaxAPICounter {
+			log.Println("Counter will exceed rate limit. Waiting")
 			kc.Cond.Wait()
 		}
 		kc.APICounter += incrementAmount
