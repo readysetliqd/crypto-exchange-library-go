@@ -339,6 +339,90 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 	return &openOrders, nil
 }
 
+// Calls Kraken API private Account Data "OpenOrders" endpoint with default
+// parameters filtered by orders for arg 'pair'. Returns a map of (key) transaction
+// IDs and (value) its order information of all open orders for the pair.
+//
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
+//
+// # Example Usage:
+//
+//	orders, err := kc.GetOpenOrdersForPair("SOLUSD")
+func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]data.Order, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send Request to Kraken API
+	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var openOrders data.OpenOrdersResp
+	err = processPrivateApiResponse(res, &openOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+
+	pairOpenOrders := make(map[string]data.Order)
+	for txid, order := range openOrders.OpenOrders {
+		if order.Description.Pair == pair {
+			pairOpenOrders[txid] = order
+		}
+	}
+
+	return &pairOpenOrders, nil
+}
+
+// Calls Kraken API private Account Data "OpenOrders" endpoint with default
+// parameters filtered by orders for arg 'pair'. Returns a slice of transaction
+// IDs of all open orders for the pair.
+//
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
+//
+// # Example Usage:
+//
+//	orders, err := kc.ListOpenTxIDsForPair("SOLUSD")
+func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send Request to Kraken API
+	res, err := kc.doRequest(privatePrefix+"OpenOrders", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var openOrders data.OpenOrdersResp
+	err = processPrivateApiResponse(res, &openOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+
+	var pairOpenTxIDs []string
+	for txID, order := range openOrders.OpenOrders {
+		if order.Description.Pair == pair {
+			pairOpenTxIDs = append(pairOpenTxIDs, txID)
+		}
+	}
+
+	return pairOpenTxIDs, nil
+}
+
 // Calls Kraken API private Account Data "ClosedOrders" endpoint. Retrieves
 // information for most recent closed orders. Accepts functional options args
 // 'options'.
@@ -1562,8 +1646,9 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 	return &editOrder, nil
 }
 
-// TODO finish implementation checklist
-// Calls Kraken API private Trading "CancelOrder" endpoint.
+// Calls Kraken API private Trading "CancelOrder" endpoint. Cancels either a
+// particular open order by transaction ID passed to arg 'txID' or set of open
+// orders with specified user reference ID passed to arg 'txID'.
 //
 // # Required Permissions:
 //
@@ -1571,14 +1656,34 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 //
 // Orders and trades - Cancel & close orders
 //
-// # Functional Options:
+// # Example Usage:
 //
-// func (kc *KrakenClient) CancelOrder() (, error) {
-// 	return nil, nil
-// }
+//	cancelResp, err := kc.CancelOrder("1234") // cancels multiple w/ user ref "1234"
+func (kc *KrakenClient) CancelOrder(txID string) (*data.CancelOrderResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("txid", txID)
 
-// TODO finish implementation checklist
-// Calls Kraken API private Trading "CancelAll" endpoint.
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"CancelOrder", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var cancelOrder data.CancelOrderResp
+	err = processPrivateApiResponse(res, &cancelOrder)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &cancelOrder, nil
+}
+
+// Calls Kraken API private Trading "CancelAll" endpoint. Cancels all open orders.
 //
 // # Required Permissions:
 //
@@ -1586,14 +1691,49 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 //
 // Orders and trades - Cancel & close orders
 //
-// # Functional Options:
+// # Example Usage:
 //
-// func (kc *KrakenClient) CancelAllOrders() (uint32, error) {
-// 	return 0, nil
-// }
+//	cancelResp, err := kc.CancelAllOrders()
+func (kc *KrakenClient) CancelAllOrders() (*data.CancelOrderResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 
-// TODO finish implementation checklist
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"CancelAll", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var cancelOrder data.CancelOrderResp
+	err = processPrivateApiResponse(res, &cancelOrder)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &cancelOrder, nil
+}
+
 // Calls Kraken API private Trading "CancelAllOrdersAfter" endpoint.
+// CancelAllOrdersAfter provides a "Dead Man's Switch" mechanism to protect the
+// client from network malfunction, extreme latency or unexpected matching
+// engine downtime. The client can send a request with a timeout (in seconds),
+// that will start a countdown timer which will cancel all client orders when
+// the timer expires. The client has to keep sending new requests to push back
+// the trigger time, or deactivate the mechanism by specifying a timeout of 0.
+// If the timer expires, all orders are cancelled and then the timer remains
+// disabled until the client provides a new (non-zero) timeout.
+//
+// The recommended use is to make a call every 15 to 30 seconds, providing a
+// timeout of 60 seconds. This allows the client to keep the orders in place
+// in case of a brief disconnection or transient delay, while keeping them safe
+// in case of a network breakdown. It is also recommended to disable the timer
+// ahead of regularly scheduled trading engine maintenance (if the timer is
+// enabled, all orders will be cancelled when the trading engine comes back
+// from downtime - planned or otherwise).
 //
 // # Required Permissions:
 //
@@ -1601,14 +1741,37 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 //
 // Orders and trades - Cancel & close orders
 //
-// # Functional Options:
+// # Example Usage:
 //
-// func (kc *KrakenClient) CancelAllOrdersAfter() (, error) {
-// 	return nil, nil
-// }
+//	cancelAfterResp, err := kc.CancelAllOrdersAfter("60")
+func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAfter, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	payload.Add("timeout", timeout)
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"CancelAllOrdersAfter", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var cancelAfter data.CancelAllAfter
+	err = processPrivateApiResponse(res, &cancelAfter)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &cancelAfter, nil
+}
 
 // TODO finish implementation checklist
-// Calls Kraken API private Trading "CancelOrderBatch" endpoint.
+// Calls Kraken API private Trading "CancelOrderBatch" endpoint. Cancels
+// multiple open orders by txid or userref passed as a slice to arg 'txIDs'
+// (maximum 50 total unique IDs/references)
 //
 // # Required Permissions:
 //
@@ -1616,11 +1779,64 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 //
 // Orders and trades - Cancel & close orders
 //
-// # Functional Options:
+// # Example Usage:
 //
-// func (kc *KrakenClient) CancelOrderBatch() (uint8, error) {
-// 	return 0, nil
-// }
+//	ordersToCancel := []string{"OG5V2Y-RYKVL-DT3V3B", "OP5V2Y-RYKVL-ET3V3B"}
+//	cancelOrderResp, err := kc.CancelOrderBatch(ordersToCancel)
+func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*data.CancelOrderResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+	for _, txID := range txIDs {
+		payload.Add("orders[]", txID)
+	}
+
+	// Send request to server
+	res, err := kc.doRequest(privatePrefix+"CancelOrderBatch", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var cancelOrders data.CancelOrderResp
+	err = processPrivateApiResponse(res, &cancelOrders)
+	if err != nil {
+		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		return nil, err
+	}
+	return &cancelOrders, nil
+}
+
+// Calls Kraken API private Trading "CancelOrderBatch" endpoint and private
+// Account Data "OpenOrders" to find and cancel all open orders for market passed
+// to arg 'pair'.
+//
+// # Required Permissions:
+//
+// Order and Trades - Query open orders & trades;
+//
+// Orders and trades - Create & modify orders; OR
+//
+// Orders and trades - Cancel & close orders
+//
+// # Example Usage:
+//
+//	cancelResp, err := kc.CancelAllOrdersForPair("XXBTZUSD")
+func (kc *KrakenClient) CancelAllOrdersForPair(pair string) (*data.CancelOrderResp, error) {
+	orders, err := kc.ListOpenTxIDsForPair(pair)
+	if err != nil {
+		err = fmt.Errorf("error calling ListOpenTxIDsForPair() | %w", err)
+		return nil, err
+	}
+	cancelResp, err := kc.CancelOrderBatch(orders)
+	if err != nil {
+		err = fmt.Errorf("error calling CancelOrderBatch() | %w", err)
+		return nil, err
+	}
+	return cancelResp, nil
+}
 
 // #endregion
 

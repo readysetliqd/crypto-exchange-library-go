@@ -603,6 +603,16 @@ type EditOrderDescription struct {
 	OrderDescription string `json:"order"`
 }
 
+type CancelOrderResp struct {
+	Count   int  `json:"count"`
+	Pending bool `json:"pending"`
+}
+
+type CancelAllAfter struct {
+	CurrentTime string `json:"currentTime"`
+	TriggerTime string `json:"triggerTime"`
+}
+
 // #endregion
 
 // #region Private Funding Data structs
