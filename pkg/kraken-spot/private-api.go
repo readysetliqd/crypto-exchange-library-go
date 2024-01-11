@@ -16,117 +16,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
-
-// #region KrakenClient type definition and constructor function
-
-var sharedClient = &http.Client{}
-
-type KrakenClient struct {
-	APIKey          string
-	APISecret       []byte
-	Client          *http.Client
-	HandleRateLimit bool
-	APICounter      uint8
-	MaxAPICounter   uint8
-	APICounterDecay uint8
-	Mutex           sync.Mutex
-	Cond            *sync.Cond
-}
-
-// TODO document inputs and enums
-// Creates new authenticated client KrakenClient for Kraken API
-func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRateLimit bool) (*KrakenClient, error) {
-	decodedSecret, err := base64.StdEncoding.DecodeString(apiSecret)
-	if err != nil {
-		return nil, err
-	}
-	decayRate, ok := decayRateMap[verificationTier]
-	if !ok {
-		err = fmt.Errorf("invalid verification tier, check enum and inputs and try again")
-		return nil, err
-	}
-	maxCounter := maxCounterMap[verificationTier]
-	kc := &KrakenClient{
-		APIKey:          apiKey,
-		APISecret:       decodedSecret,
-		Client:          sharedClient,
-		HandleRateLimit: handleRateLimit,
-		MaxAPICounter:   maxCounter,
-		APICounterDecay: decayRate,
-	}
-	if handleRateLimit {
-		go kc.startRateLimiter()
-		kc.Cond = sync.NewCond(&kc.Mutex)
-	}
-	return kc, nil
-}
-
-// #endregion
-
-// #region Unexported KrakenClient helper methods
-
-// Generates a signature for a request to the Kraken API
-func (kc *KrakenClient) getSignature(urlPath string, values url.Values) string {
-	sha := sha256.New()
-	sha.Write([]byte(values.Get("nonce") + values.Encode()))
-	shasum := sha.Sum(nil)
-
-	mac := hmac.New(sha512.New, kc.APISecret)
-	mac.Write(append([]byte(urlPath), shasum...))
-	macsum := mac.Sum(nil)
-	return base64.StdEncoding.EncodeToString(macsum)
-}
-
-// Sends a request to the Kraken API and returns the response
-func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Response, error) {
-	signature := kc.getSignature(urlPath, values)
-
-	req, err := http.NewRequest("POST", baseUrl+urlPath, strings.NewReader(values.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Add("API-Key", kc.APIKey)
-	req.Header.Add("API-Sign", signature)
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	return kc.Client.Do(req)
-}
-
-// A go func method with a timer that decays kc.APICounter every second by the
-// amount in kc.APICounterDecay. Stops at 0.
-func (kc *KrakenClient) startRateLimiter() {
-	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
-	defer ticker.Stop()
-	for range ticker.C {
-		kc.Mutex.Lock()
-		if kc.APICounter > 0 {
-			kc.APICounter -= 1
-		}
-		kc.Mutex.Unlock()
-		kc.Cond.Broadcast()
-	}
-}
-
-// If HandleRateLimit is true, checks rate limit increment won't exceed max
-// counter cap. If it will, waits for counter to decrement before proceeding
-func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
-	if kc.HandleRateLimit {
-		kc.Mutex.Lock()
-		for kc.APICounter+1 >= kc.MaxAPICounter {
-			log.Println("Counter will exceed rate limit. Waiting")
-			kc.Cond.Wait()
-		}
-		kc.APICounter += incrementAmount
-		kc.Mutex.Unlock()
-	}
-}
-
-// #endregion
 
 // #region Public Market Data endpoints
 
@@ -3889,11 +3782,16 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 
 // #region Websockets Authentication endpoint
 
-// Calls Kraken API private Account Data "GetWebSocketsToken" endpoint. An
-// authentication token must be requested via this REST API endpoint in order
-// to connect to and authenticate with our Websockets API. The token should be
-// used within 15 minutes of creation, but it does not expire once a successful
-// Websockets connection and private subscription has been made and is maintained.
+// Calls Kraken API private Account Data "GetWebSocketsToken" endpoint. This
+// method only returns the API's response as a struct including the token and
+// the number of seconds until expiration. It does not add the token to *KrakenClient.
+// Use *KrakenClient method AuthenticateWebsocket() instead.
+//
+// Note: An authentication token must be requested via this REST API endpoint
+// in order to connect to and authenticate with our Websockets API. The token
+// should be used within 15 minutes of creation, but it does not expire once
+// a successful WebSockets connection and private subscription has been made
+// and is maintained.
 //
 // # Required Permissions:
 //
@@ -3925,6 +3823,80 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 		return nil, err
 	}
 	return &token, nil
+}
+
+// Adds WebSockets token to *KrakenClient via Kraken API private Account Data
+// "GetWebSocketsToken" endpoint. This method must be called before subscribing
+// to any authenticated WebSockets.
+//
+// Note: An authentication token must be requested via this REST API endpoint
+// in order to connect to and authenticate with our Websockets API. The token
+// should be used within 15 minutes of creation, but it does not expire once
+// a successful WebSockets connection and private subscription has been made
+// and is maintained.
+//
+// # Required Permissions:
+//
+// WebSockets interface - On;
+//
+// # Example Usage:
+//
+//	err := kc.GetWebSocketsToken()
+func (kc *KrakenClient) AuthenticateWebsocket() error {
+	tokenResp, err := kc.GetWebSocketsToken()
+	if err != nil {
+		err = fmt.Errorf("error calling getwebsocketstoken() | %w", err)
+		return err
+	}
+	kc.Mutex.Lock()
+	kc.WebSocketsToken = tokenResp.Token
+	kc.Mutex.Unlock()
+	return nil
+}
+
+// #endregion
+
+// #region Unexported KrakenClient helper methods
+
+// Generates a signature for a request to the Kraken API
+func (kc *KrakenClient) getSignature(urlPath string, values url.Values) string {
+	sha := sha256.New()
+	sha.Write([]byte(values.Get("nonce") + values.Encode()))
+	shasum := sha.Sum(nil)
+
+	mac := hmac.New(sha512.New, kc.APISecret)
+	mac.Write(append([]byte(urlPath), shasum...))
+	macsum := mac.Sum(nil)
+	return base64.StdEncoding.EncodeToString(macsum)
+}
+
+// Sends a request to the Kraken API and returns the response
+func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Response, error) {
+	signature := kc.getSignature(urlPath, values)
+
+	req, err := http.NewRequest("POST", baseUrl+urlPath, strings.NewReader(values.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("API-Key", kc.APIKey)
+	req.Header.Add("API-Sign", signature)
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	return kc.Client.Do(req)
+}
+
+// If HandleRateLimit is true, checks rate limit increment won't exceed max
+// counter cap. If it will, waits for counter to decrement before proceeding
+func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
+	if kc.HandleRateLimit {
+		kc.Mutex.Lock()
+		for kc.APICounter+1 >= kc.MaxAPICounter {
+			log.Println("Counter will exceed rate limit. Waiting")
+			kc.Cond.Wait()
+		}
+		kc.APICounter += incrementAmount
+		kc.Mutex.Unlock()
+	}
 }
 
 // #endregion

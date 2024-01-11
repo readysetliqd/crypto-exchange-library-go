@@ -1,8 +1,12 @@
 package krakenspot
 
-const baseUrl = "https://api.kraken.com"
-const publicPrefix = "/0/public/"
-const privatePrefix = "/0/private/"
+const (
+	baseUrl       = "https://api.kraken.com"
+	publicPrefix  = "/0/public/"
+	privatePrefix = "/0/private/"
+	wsPublicURL   = "ws.kraken.com"
+	wsPrivateURL  = "ws-auth.kraken.com"
+)
 
 const (
 	pairsMapSize   = 745 // As of 12/29/2023 there were 677 tradeable pairs. 10% added for buffer
