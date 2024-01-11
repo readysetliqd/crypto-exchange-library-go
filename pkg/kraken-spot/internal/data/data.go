@@ -193,38 +193,42 @@ type OHLCData struct {
 }
 
 func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
-	dataMap := make(map[string]interface{})
-	json.Unmarshal(data, &dataMap)
-	ohlc.Last = uint64(dataMap["last"].(float64))
+	var dataMap map[string]interface{}
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+		return fmt.Errorf("error unmarshalling data to map | %w", err)
+	}
+	if last, ok := dataMap["last"].(float64); ok {
+		ohlc.Last = uint64(last)
+	} else {
+		return fmt.Errorf("\"last\" assertion error")
+	}
 	for key := range dataMap {
 		if key != "last" {
 			ohlc.Ticker = key
 			tempDataSlice, ok := dataMap[key].([]interface{})
 			if !ok {
 				return fmt.Errorf("OHLCDataSlice assertion error")
-			} else {
-				ohlc.Data = make(OHLCDataSlice, len(tempDataSlice)-1)
-				for i, v := range tempDataSlice {
-					item, ok := v.([]interface{})
-					if !ok {
-						return fmt.Errorf("OHLCData item assertion error")
-					} else {
-						ohlcData := OHLCData{
-							Time:   uint64(item[0].(float64)),
-							Open:   item[1].(string),
-							High:   item[2].(string),
-							Low:    item[3].(string),
-							Close:  item[4].(string),
-							VWAP:   item[5].(string),
-							Volume: item[6].(string),
-							Count:  uint32(item[7].(float64)),
-						}
-						if i == len(tempDataSlice)-1 {
-							ohlc.Current = ohlcData
-						} else {
-							ohlc.Data[i] = ohlcData
-						}
-					}
+			}
+			ohlc.Data = make(OHLCDataSlice, len(tempDataSlice)-1)
+			for i, v := range tempDataSlice {
+				item, ok := v.([]interface{})
+				if !ok {
+					return fmt.Errorf("OHLCData item assertion error")
+				}
+				ohlcData := OHLCData{
+					Time:   uint64(item[0].(float64)),
+					Open:   item[1].(string),
+					High:   item[2].(string),
+					Low:    item[3].(string),
+					Close:  item[4].(string),
+					VWAP:   item[5].(string),
+					Volume: item[6].(string),
+					Count:  uint32(item[7].(float64)),
+				}
+				if i == len(tempDataSlice)-1 {
+					ohlc.Current = ohlcData
+				} else {
+					ohlc.Data[i] = ohlcData
 				}
 			}
 		}
