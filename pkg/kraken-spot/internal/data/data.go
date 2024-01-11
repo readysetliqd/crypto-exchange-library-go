@@ -203,6 +203,7 @@ func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
 			if !ok {
 				return fmt.Errorf("OHLCDataSlice assertion error")
 			} else {
+				ohlc.Data = make(OHLCDataSlice, len(tempDataSlice)-1)
 				for i, v := range tempDataSlice {
 					item, ok := v.([]interface{})
 					if !ok {
@@ -221,7 +222,7 @@ func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
 						if i == len(tempDataSlice)-1 {
 							ohlc.Current = ohlcData
 						} else {
-							ohlc.Data = append(ohlc.Data, ohlcData)
+							ohlc.Data[i] = ohlcData
 						}
 					}
 				}
