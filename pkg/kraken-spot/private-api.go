@@ -12,7 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,8 +128,6 @@ func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 // #endregion
 
 // #region Public Market Data endpoints
-
-// TODO copy public endpoints as methods for authenticated access
 
 // Calls Kraken API public market data "Time" endpoint. Gets the server's time.
 // data.ServerTime struct
@@ -259,9 +257,257 @@ func (kc *KrakenClient) ListAssets() ([]string, error) {
 		allAssets[i] = asset
 		i++
 	}
-	sort.Strings(allAssets)
+	slices.Sort(allAssets)
 	return allAssets, nil
 }
+
+// Calls Kraken API public market data "Assets" endpoint. Gets information about
+// specific asset passed to arg.
+func (kc *KrakenClient) GetAssetInfo(asset string) (*data.AssetInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	endpoint := "Assets?asset=" + asset
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	assetInfo := make(map[string]data.AssetInfo)
+	err = processAPIResponse(res, &assetInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	// Add ticker to each AssetInfo
+	for ticker, info := range assetInfo {
+		info.Ticker = ticker
+		assetInfo[ticker] = info
+	}
+	info := assetInfo[asset]
+	return &info, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint with default info
+// query parameter. Calling function without arguments gets info for all tradable
+// asset pairs. Accepts one optional argument for the "pair" query parameter. If
+// multiple pairs are desired, pass them as one comma delimited string into the
+// pair argument.
+func (kc *KrakenClient) GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	var initialCapacity int
+	endpoint := "AssetPairs"
+	if len(pair) > 0 {
+		initialCapacity = 1
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = pairsMapSize
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
+	err = processAPIResponse(res, &pairInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	// Add ticker to each AssetPairInfo
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
+	return &pairInfo, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint with "margin" info
+// query parameter. Calling function without arguments gets info for all tradable
+// asset pairs. Accepts one optional argument for the "pair" query parameter. If
+// multiple pairs are desired, pass them as one comma delimited string into the
+// pair argument.
+func (kc *KrakenClient) GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	var initialCapacity int
+	endpoint := "AssetPairs?info=margin"
+	if len(pair) > 0 {
+		initialCapacity = 1
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = pairsMapSize
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
+	err = processAPIResponse(res, &pairInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	// Add ticker to each AssetPairInfo
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
+	return &pairInfo, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint with "fees" info
+// query parameter. Calling function without arguments gets info for all tradable
+// asset pairs. Accepts one optional argument for the "pair" query parameter. If
+// multiple pairs are desired, pass them as one comma delimited string into the
+// pair argument.
+func (kc *KrakenClient) GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	var initialCapacity int
+	endpoint := "AssetPairs?info=fees"
+	if len(pair) > 0 {
+		initialCapacity = 1
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = pairsMapSize
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
+	err = processAPIResponse(res, &pairInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	// Add ticker to each AssetPairInfo
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
+	return &pairInfo, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint with "leverage" info
+// query parameter. Calling function without arguments gets info for all tradable
+// asset pairs. Accepts one optional argument for the "pair" query parameter. If
+// multiple pairs are desired, pass them as one comma delimited string into the
+// pair argument.
+func (kc *KrakenClient) GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLeverage, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	var initialCapacity int
+	endpoint := "AssetPairs?info=leverage"
+	if len(pair) > 0 {
+		initialCapacity = 1
+		if len(pair) > 1 {
+			err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+			return nil, err
+		}
+		endpoint += "?pair=" + pair[0]
+	} else {
+		initialCapacity = pairsMapSize
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
+	err = processAPIResponse(res, &pairInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	// Add ticker to each AssetPairInfo
+	for ticker, info := range pairInfo {
+		info.Ticker = ticker
+		pairInfo[ticker] = info
+	}
+	return &pairInfo, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint and returns slice
+// of all tradeable pair names. Sorted alphabetically.
+func (kc *KrakenClient) ListTradeablePairs() ([]string, error) {
+	pairInfo, err := kc.GetTradeablePairsInfo()
+	tradeablePairs := make([]string, len((*pairInfo)))
+	if err != nil {
+		return nil, err
+	}
+	i := 0
+	for pair := range *pairInfo {
+		tradeablePairs[i] = pair
+		i++
+	}
+	slices.Sort(tradeablePairs)
+	return tradeablePairs, nil
+}
+
+// TODO copy public endpoints as methods for authenticated access
 
 // #endregion
 
