@@ -3842,7 +3842,7 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 // # Example Usage:
 //
 //	err := kc.GetWebSocketsToken()
-func (kc *KrakenClient) AuthenticateWebsocket() error {
+func (kc *KrakenClient) AuthenticateWebSockets() error {
 	tokenResp, err := kc.GetWebSocketsToken()
 	if err != nil {
 		err = fmt.Errorf("error calling getwebsocketstoken() | %w", err)
