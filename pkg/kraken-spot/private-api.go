@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -522,6 +523,266 @@ func (kc *KrakenClient) ListWebsocketNames() ([]string, error) {
 	}
 	slices.Sort(websocketNames)
 	return websocketNames, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint and returns slice
+// of all tradeable pairs' altnames. Sorted alphabetically.
+func (kc *KrakenClient) ListAltNames() ([]string, error) {
+	pairInfo, err := kc.GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	altNames := make([]string, len(*pairInfo))
+	i := 0
+	for _, pair := range *pairInfo {
+		altNames[i] = pair.Altname
+		i++
+	}
+	slices.Sort(altNames)
+	return altNames, nil
+}
+
+// Calls Kraken API public market data "AssetPairs" endpoint and returns map of
+// all tradeable websocket names for fast lookup.
+func (kc *KrakenClient) MapWebsocketNames() (map[string]bool, error) {
+	pairInfo, err := kc.GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	websocketNames := make(map[string]bool, pairsMapSize)
+	for _, pair := range *pairInfo {
+		websocketNames[pair.Wsname] = true
+	}
+	return websocketNames, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Accepts one argument
+// for the "pair" query parameter. If multiple pairs are desired, pass them as
+// one comma delimited string into the pair argument.
+//
+// Note: Today's prices start at midnight UTC
+func (kc *KrakenClient) GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	endpoint := "Ticker?pair=" + pair
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	initialCapacity := 1
+	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	err = processAPIResponse(res, &tickers)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	// Add ticker to each TickerInfo
+	for ticker, info := range tickers {
+		info.Ticker = ticker
+		tickers[ticker] = info
+	}
+	return &tickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Returns a slice of
+// tickers sorted descending by their last 24 hour USD volume. Calling this
+// function without passing a value to arg num will return the entire list
+// of sorted pairs. Passing a value to num will return a slice of the top num
+// sorted pairs.
+func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
+	if len(num) > 1 {
+		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
+		return nil, err
+	}
+	topVolumeTickers := make([]data.TickerVolume, 0, tickersMapSize)
+	tickers, err := kc.GetAllTickerInfo()
+	if err != nil {
+		return nil, err
+	}
+	allPairs, err := kc.GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+
+	for ticker := range *tickers {
+		if _, ok := (*allPairs)[ticker]; ok {
+			usdEquivalents := map[string]bool{
+				"DAI":   true,
+				"PYUSD": true,
+				"USDC":  true,
+				"USDT":  true,
+				"ZUSD":  true,
+			}
+			if usdEquivalents[(*allPairs)[ticker].Quote] {
+				volume, vwap, err := parseVolumeVwap(ticker, ticker, tickers)
+				if err != nil {
+					return nil, err
+				}
+				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				// Handle cases where USD is base currency
+			} else if (*allPairs)[ticker].Base == "ZUSD" {
+				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
+				if err != nil {
+					return nil, err
+				}
+				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: volume})
+			} else {
+				// Find matching pair with base and quote USD equivalent to normalize to USD volume
+				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
+					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"ZUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				} else if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"USD"]; ok {
+					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"USD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					// Handle edge cases specific to Kraken API base not matching data in tickers
+				} else if (*allPairs)[ticker].Base == "XXDG" {
+					volume, vwap, err := parseVolumeVwap(ticker, "XDGUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				} else if (*allPairs)[ticker].Base == "ZAUD" {
+					volume, vwap, err := parseVolumeVwap(ticker, "AUDUSD", tickers)
+					if err != nil {
+						return nil, err
+					}
+					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				}
+			}
+		}
+	}
+	// Sort by descending volume and cut slice to num length
+	sort.Slice(topVolumeTickers, func(i, j int) bool {
+		return topVolumeTickers[i].Volume > topVolumeTickers[j].Volume
+	})
+	if len(num) > 0 {
+		if num[0] < uint16(len(topVolumeTickers)) {
+			topVolumeTickers = topVolumeTickers[:num[0]]
+		}
+	}
+	return topVolumeTickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Gets ticker info for
+// all tradeable pairs.
+//
+// Note: Today's prices start at midnight UTC
+func (kc *KrakenClient) GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	endpoint := "Ticker"
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	initialCapacity := pairsMapSize
+	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	err = processAPIResponse(res, &tickers)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	// Add ticker to each TickerInfo
+	for ticker, info := range tickers {
+		info.Ticker = ticker
+		tickers[ticker] = info
+	}
+	return &tickers, nil
+}
+
+// Calls Kraken API public market data "Ticker" endpoint. Returns a slice of
+// tickers sorted descending by their last 24 hour number of trades. Calling
+// this function without passing a value to arg num will return the entire list
+// of sorted pairs. Passing a value to num will return a slice of the top num
+// sorted pairs.
+func (kc *KrakenClient) ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) {
+	if len(num) > 1 {
+		err := fmt.Errorf("too many arguments passed into ListTopNumberTradesLast24Hours(). excpected 0 or 1")
+		return nil, err
+	}
+	topTradesTickers := make([]data.TickerTrades, 0, tickersMapSize)
+	tickers, err := kc.GetAllTickerInfo()
+	if err != nil {
+		return nil, err
+	}
+	for ticker := range *tickers {
+		numTrades := (*tickers)[ticker].NumberOfTrades.Last24Hours
+		topTradesTickers = append(topTradesTickers, data.TickerTrades{Ticker: ticker, NumTrades: numTrades})
+	}
+	sort.Slice(topTradesTickers, func(i, j int) bool {
+		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
+	})
+	if len(num) > 0 {
+		if num[0] < uint16(len(topTradesTickers)) {
+			topTradesTickers = topTradesTickers[:num[0]]
+		}
+	}
+	return topTradesTickers, nil
+}
+
+// Calls Kraken API public market data "OHLC" endpoint. Gets OHLC data for
+// specified pair of the required interval (in minutes).
+//
+// Accepts optional arg since as a start time in Unix for the data. However,
+// per the Kraken API docs "Note: the last entry in the OHLC array is for the
+// current, not-yet-committed frame and will always be present, regardless of
+// the value of since.
+//
+// Enum - 'interval': 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	endpoint := fmt.Sprintf("OHLC?pair=%s&interval=%v", pair, interval)
+	if len(since) > 0 {
+		if len(since) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetOHLC(). excpected 2 or 3 including args 'pair' and 'interval'")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&since=%v", since)
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var OHLC data.OHLCResp
+	err = processAPIResponse(res, &OHLC)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	return &OHLC, nil
 }
 
 // TODO copy public endpoints as methods for authenticated access

@@ -244,7 +244,7 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 // of all tradeable pair names. Sorted alphabetically.
 func ListTradeablePairs() ([]string, error) {
 	pairInfo, err := GetTradeablePairsInfo()
-	tradeablePairs := make([]string, len((*pairInfo)))
+	tradeablePairs := make([]string, len(*pairInfo))
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +264,7 @@ func ListWebsocketNames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	websocketNames := make([]string, len((*pairInfo)))
+	websocketNames := make([]string, len(*pairInfo))
 	i := 0
 	for _, pair := range *pairInfo {
 		websocketNames[i] = pair.Wsname
@@ -281,9 +281,11 @@ func ListAltNames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	altNames := []string{}
-	for pair := range *pairInfo {
-		altNames = append(altNames, (*pairInfo)[pair].Altname)
+	altNames := make([]string, len(*pairInfo))
+	i := 0
+	for _, pair := range *pairInfo {
+		altNames[i] = pair.Altname
+		i++
 	}
 	slices.Sort(altNames)
 	return altNames, nil
@@ -297,8 +299,8 @@ func MapWebsocketNames() (map[string]bool, error) {
 		return nil, err
 	}
 	websocketNames := make(map[string]bool, pairsMapSize)
-	for pair := range *pairInfo {
-		websocketNames[(*pairInfo)[pair].Wsname] = true
+	for _, pair := range *pairInfo {
+		websocketNames[pair.Wsname] = true
 	}
 	return websocketNames, nil
 }
@@ -470,7 +472,6 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 // Enum - 'interval': 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
 func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
 	endpoint := fmt.Sprintf("OHLC?pair=%s&interval=%v", pair, interval)
-	OHLC := &data.OHLCResp{}
 	if len(since) > 0 {
 		if len(since) > 1 {
 			err := fmt.Errorf("too many arguments passed for func: GetOHLC(). excpected 2 or 3 including args 'pair' and 'interval'")
@@ -478,11 +479,12 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 		}
 		endpoint += fmt.Sprintf("&since=%v", since)
 	}
-	err := callPublicApi(endpoint, OHLC)
+	var OHLC data.OHLCResp
+	err := callPublicApi(endpoint, &OHLC)
 	if err != nil {
 		return nil, err
 	}
-	return OHLC, nil
+	return &OHLC, nil
 }
 
 // Calls Kraken API public market data "Depth" endpoint. Gets arrays of bids and
