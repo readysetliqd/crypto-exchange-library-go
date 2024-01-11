@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,32 +96,6 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 	return kc.Client.Do(req)
 }
 
-// Processes Kraken API response and unmarshals it into ApiResp data struct.
-// Passed arg 'target' is unmarshalled into ApiResp 'Result' field.
-func processPrivateApiResponse(res *http.Response, target interface{}) error {
-	var err error
-	if res.StatusCode == http.StatusOK {
-		msg, err := io.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		resp := data.ApiResp{Result: target}
-		err = json.Unmarshal(msg, &resp)
-		if err != nil {
-			err = fmt.Errorf("error unmarshalling msg to resp | %w", err)
-			return err
-		}
-		if len(resp.Error) != 0 {
-			err = fmt.Errorf("api error(s) | %v", resp.Error)
-			return err
-		}
-		return nil
-	} else {
-		err = fmt.Errorf("http status code not OK; status code | %v", res.StatusCode)
-		return err
-	}
-}
-
 // A go func method with a timer that decays kc.APICounter every second by the
 // amount in kc.APICounterDecay. Stops at 0.
 func (kc *KrakenClient) startRateLimiter() {
@@ -153,7 +128,141 @@ func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 // #endregion
 
 // #region Public Market Data endpoints
+
 // TODO copy public endpoints as methods for authenticated access
+
+// Calls Kraken API public market data "Time" endpoint. Gets the server's time.
+// data.ServerTime struct
+func (kc *KrakenClient) GetServerTime() (*data.ServerTime, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+"Time", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var systemStatus data.ServerTime
+	err = processAPIResponse(res, &systemStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	return &systemStatus, nil
+}
+
+// Calls Kraken API public market data "SystemStatus" endpoint. Gets the current
+// system status or trading mode
+//
+// # Example Usage:
+//
+//	status, err := krakenspot.GetSystemStatus()
+//	log.Println(status.Status)
+//	log.Println(status.Timestamp)
+func (kc *KrakenClient) GetSystemStatus() (*data.SystemStatus, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+"SystemStatus", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var systemStatus data.SystemStatus
+	err = processAPIResponse(res, &systemStatus)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	return &systemStatus, nil
+}
+
+// Calls Kraken API public market data "SystemStatus" endpoint and returns true
+// if system is online. Returns false and current status as a string if not
+// online. Returns false and error if error produced from calling API.
+//
+// # Example Usage:
+//
+//	online, status := krakenspot.SystemIsOnline()
+//	if !online {
+//		log.Println(status)
+//	}
+func (kc *KrakenClient) SystemIsOnline() (bool, string) {
+	systemStatus, err := kc.GetSystemStatus()
+	if err != nil {
+		log.Println("error calling GetSystemStatus() | ", err)
+		return false, "error"
+	}
+	if systemStatus.Status == "online" {
+		return true, systemStatus.Status
+	}
+	return false, systemStatus.Status
+}
+
+// Calls Kraken API public market data "Assets" endpoint. Gets information about
+// all assets that are available for deposit, withdrawal, trading and staking.
+// Returns them as *map[string]data.AssetInfo where the string is the asset name.
+func (kc *KrakenClient) GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+"Assets", payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
+	err = processAPIResponse(res, &allAssetInfo)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	// Add ticker to each AssetInfo
+	for ticker, info := range allAssetInfo {
+		info.Ticker = ticker
+		allAssetInfo[ticker] = info
+	}
+	return &allAssetInfo, nil
+}
+
+// Calls Kraken API public market data "Assets" endpoint. Returns a slice of
+// strings of all tradeable asset names
+func (kc *KrakenClient) ListAssets() ([]string, error) {
+	allAssetInfo, err := kc.GetAllAssetInfo()
+	if err != nil {
+		err = fmt.Errorf("error calling GetAllAssetInfo() | %w", err)
+		return nil, err
+	}
+	allAssets := make([]string, len((*allAssetInfo)))
+	i := 0
+	for asset := range *allAssetInfo {
+		allAssets[i] = asset
+		i++
+	}
+	sort.Strings(allAssets)
+	return allAssets, nil
+}
+
 // #endregion
 
 // #region Authenticated Account Data endpoints
@@ -175,7 +284,7 @@ func (kc *KrakenClient) GetAccountBalances() (*map[string]string, error) {
 	}
 	defer res.Body.Close()
 	var balances map[string]string
-	err = processPrivateApiResponse(res, &balances)
+	err = processAPIResponse(res, &balances)
 	if err != nil {
 		return nil, err
 	}
@@ -218,9 +327,9 @@ func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance,
 	}
 	defer res.Body.Close()
 	var balances map[string]data.ExtendedBalance
-	err = processPrivateApiResponse(res, &balances)
+	err = processAPIResponse(res, &balances)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &balances, nil
@@ -344,9 +453,9 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 	}
 	defer res.Body.Close()
 	var balance data.TradeBalance
-	err = processPrivateApiResponse(res, &balance)
+	err = processAPIResponse(res, &balance)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &balance, nil
@@ -392,9 +501,9 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 
 	// Process API response
 	var openOrders data.OpenOrdersResp
-	err = processPrivateApiResponse(res, &openOrders)
+	err = processAPIResponse(res, &openOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &openOrders, nil
@@ -427,9 +536,9 @@ func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]data.Orde
 
 	// Process API response
 	var openOrders data.OpenOrdersResp
-	err = processPrivateApiResponse(res, &openOrders)
+	err = processAPIResponse(res, &openOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 
@@ -470,9 +579,9 @@ func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
 
 	// Process API response
 	var openOrders data.OpenOrdersResp
-	err = processPrivateApiResponse(res, &openOrders)
+	err = processAPIResponse(res, &openOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 
@@ -550,9 +659,9 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 
 	// Process API response
 	var closedOrders data.ClosedOrdersResp
-	err = processPrivateApiResponse(res, &closedOrders)
+	err = processAPIResponse(res, &closedOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &closedOrders, nil
@@ -604,9 +713,9 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 
 	// Process API response
 	var queriedOrders map[string]data.Order
-	err = processPrivateApiResponse(res, &queriedOrders)
+	err = processAPIResponse(res, &queriedOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &queriedOrders, nil
@@ -670,9 +779,9 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 
 	// Process API response
 	var tradesHistory data.TradesHistoryResp
-	err = processPrivateApiResponse(res, &tradesHistory)
+	err = processAPIResponse(res, &tradesHistory)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &tradesHistory, nil
@@ -716,9 +825,9 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 
 	// Process API response
 	var tradeInfo map[string]data.TradeInfo
-	err = processPrivateApiResponse(res, &tradeInfo)
+	err = processAPIResponse(res, &tradeInfo)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &tradeInfo, nil
@@ -762,9 +871,9 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 
 	// Process API response
 	var openPositions map[string]data.OpenPosition
-	err = processPrivateApiResponse(res, &openPositions)
+	err = processAPIResponse(res, &openPositions)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &openPositions, nil
@@ -810,9 +919,9 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 
 	// Process API response
 	var openPositions []data.OpenPositionConsolidated
-	err = processPrivateApiResponse(res, &openPositions)
+	err = processAPIResponse(res, &openPositions)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &openPositions, nil
@@ -882,9 +991,9 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 
 	// Process API response
 	var ledgersInfo data.LedgersInfoResp
-	err = processPrivateApiResponse(res, &ledgersInfo)
+	err = processAPIResponse(res, &ledgersInfo)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &ledgersInfo, nil
@@ -928,9 +1037,9 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 
 	// Process API response
 	var ledgersInfo map[string]data.Ledger
-	err = processPrivateApiResponse(res, &ledgersInfo)
+	err = processAPIResponse(res, &ledgersInfo)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &ledgersInfo, nil
@@ -974,9 +1083,9 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 
 	// Process API response
 	var tradeVolume data.TradeVolume
-	err = processPrivateApiResponse(res, &tradeVolume)
+	err = processAPIResponse(res, &tradeVolume)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &tradeVolume, nil
@@ -1041,14 +1150,14 @@ func (kc *KrakenClient) RequestTradesExportReport(description string, options ..
 
 	// Process API response
 	var exportResp data.RequestExportReportResp
-	err = processPrivateApiResponse(res, &exportResp)
+	err = processAPIResponse(res, &exportResp)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "EGeneral:Internal error") {
-			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processPrivateApiResponse() | %w", err)
+			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processAPIResponse() | %w", err)
 			return "", err
 		} else {
-			err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+			err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 			return "", err
 		}
 	}
@@ -1114,14 +1223,14 @@ func (kc *KrakenClient) RequestLedgersExportReport(description string, options .
 
 	// Process API response
 	var exportResp data.RequestExportReportResp
-	err = processPrivateApiResponse(res, &exportResp)
+	err = processAPIResponse(res, &exportResp)
 	if err != nil {
 		errStr := err.Error()
 		if strings.Contains(errStr, "EGeneral:Internal error") {
-			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processPrivateApiResponse() | %w", err)
+			err = fmt.Errorf("if RLWithFields() was passed to 'options', check 'fields' format is correct and 'fields' values matche enum | error calling processAPIResponse() | %w", err)
 			return "", err
 		} else {
-			err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+			err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 			return "", err
 		}
 	}
@@ -1172,9 +1281,9 @@ func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.Export
 
 	// Process API response
 	var exportReports []data.ExportReportStatus
-	err = processPrivateApiResponse(res, &exportReports)
+	err = processAPIResponse(res, &exportReports)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &exportReports, nil
@@ -1274,9 +1383,9 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 
 	// Process API response
 	var deleteResp data.DeleteReportResp
-	err = processPrivateApiResponse(res, &deleteResp)
+	err = processAPIResponse(res, &deleteResp)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return err
 	}
 	if !deleteResp.Delete && !deleteResp.Cancel {
@@ -1538,9 +1647,9 @@ func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair st
 
 	// Process API response
 	var newOrder data.AddOrderResp
-	err = processPrivateApiResponse(res, &newOrder)
+	err = processAPIResponse(res, &newOrder)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &newOrder, nil
@@ -1616,9 +1725,9 @@ func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options 
 
 	// Process API response
 	var newOrders data.AddOrderBatchResp
-	err = processPrivateApiResponse(res, &newOrders)
+	err = processAPIResponse(res, &newOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &newOrders, nil
@@ -1716,9 +1825,9 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 
 	// Process API response
 	var editOrder data.EditOrderResp
-	err = processPrivateApiResponse(res, &editOrder)
+	err = processAPIResponse(res, &editOrder)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &editOrder, nil
@@ -1753,9 +1862,9 @@ func (kc *KrakenClient) CancelOrder(txID string) (*data.CancelOrderResp, error) 
 
 	// Process API response
 	var cancelOrder data.CancelOrderResp
-	err = processPrivateApiResponse(res, &cancelOrder)
+	err = processAPIResponse(res, &cancelOrder)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &cancelOrder, nil
@@ -1787,9 +1896,9 @@ func (kc *KrakenClient) CancelAllOrders() (*data.CancelOrderResp, error) {
 
 	// Process API response
 	var cancelOrder data.CancelOrderResp
-	err = processPrivateApiResponse(res, &cancelOrder)
+	err = processAPIResponse(res, &cancelOrder)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &cancelOrder, nil
@@ -1838,9 +1947,9 @@ func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAft
 
 	// Process API response
 	var cancelAfter data.CancelAllAfter
-	err = processPrivateApiResponse(res, &cancelAfter)
+	err = processAPIResponse(res, &cancelAfter)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &cancelAfter, nil
@@ -1878,9 +1987,9 @@ func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*data.CancelOrderResp,
 
 	// Process API response
 	var cancelOrders data.CancelOrderResp
-	err = processPrivateApiResponse(res, &cancelOrders)
+	err = processAPIResponse(res, &cancelOrders)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &cancelOrders, nil
@@ -1958,9 +2067,9 @@ func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMet
 
 	// Process API response
 	var depositMethods []data.DepositMethod
-	err = processPrivateApiResponse(res, &depositMethods)
+	err = processAPIResponse(res, &depositMethods)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &depositMethods, nil
@@ -2007,9 +2116,9 @@ func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options
 
 	// Process API response
 	var depositAddresses []data.DepositAddress
-	err = processPrivateApiResponse(res, &depositAddresses)
+	err = processAPIResponse(res, &depositAddresses)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &depositAddresses, nil
@@ -2070,9 +2179,9 @@ func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*
 
 	// Process API response
 	var depositsStatus []data.DepositStatus
-	err = processPrivateApiResponse(res, &depositsStatus)
+	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &depositsStatus, nil
@@ -2144,9 +2253,9 @@ func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusP
 
 	// Process API response
 	var depositsStatus data.DepositStatusPaginated
-	err = processPrivateApiResponse(res, &depositsStatus)
+	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &depositsStatus, nil
@@ -2192,9 +2301,9 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 
 	// Process API response
 	var depositsStatus data.DepositStatusPaginated
-	err = processPrivateApiResponse(res, &depositsStatus)
+	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &depositsStatus, nil
@@ -2246,9 +2355,9 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 
 	// Process API response
 	var withdrawalMethods []data.WithdrawalMethod
-	err = processPrivateApiResponse(res, &withdrawalMethods)
+	err = processAPIResponse(res, &withdrawalMethods)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalMethods, nil
@@ -2305,9 +2414,9 @@ func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddresses
 
 	// Process API response
 	var withdrawalAddresses []data.WithdrawalAddress
-	err = processPrivateApiResponse(res, &withdrawalAddresses)
+	err = processAPIResponse(res, &withdrawalAddresses)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalAddresses, nil
@@ -2344,9 +2453,9 @@ func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount strin
 
 	// Process API response
 	var withdrawalInfo data.WithdrawalInfo
-	err = processPrivateApiResponse(res, &withdrawalInfo)
+	err = processAPIResponse(res, &withdrawalInfo)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalInfo, nil
@@ -2396,9 +2505,9 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 
 	// Process API response
 	var withdrawFundsResp data.WithdrawFundsResponse
-	err = processPrivateApiResponse(res, &withdrawFundsResp)
+	err = processAPIResponse(res, &withdrawFundsResp)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return "", err
 	}
 	return withdrawFundsResp.RefID, nil
@@ -2457,9 +2566,9 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 
 	// Process API response
 	var withdrawalsStatus []data.WithdrawalStatus
-	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalsStatus, nil
@@ -2532,9 +2641,9 @@ func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsS
 
 	// Process API response
 	var withdrawalsStatus data.WithdrawalStatusPaginated
-	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalsStatus, nil
@@ -2581,9 +2690,9 @@ func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.Wit
 
 	// Process API response
 	var withdrawalsStatus data.WithdrawalStatusPaginated
-	err = processPrivateApiResponse(res, &withdrawalsStatus)
+	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &withdrawalsStatus, nil
@@ -2618,9 +2727,9 @@ func (kc *KrakenClient) CancelWithdrawal(asset string, refID string) error {
 
 	// Process API response
 	var cancelSuccessful bool
-	err = processPrivateApiResponse(res, &cancelSuccessful)
+	err = processAPIResponse(res, &cancelSuccessful)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return err
 	}
 	if !cancelSuccessful {
@@ -2662,9 +2771,9 @@ func (kc *KrakenClient) TransferToFutures(asset string, amount string) (string, 
 
 	// Process API response
 	var refID data.WalletTransferResponse
-	err = processPrivateApiResponse(res, &refID)
+	err = processAPIResponse(res, &refID)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return "", err
 	}
 
@@ -2706,9 +2815,9 @@ func (kc *KrakenClient) CreateSubaccount(username string, email string) error {
 
 	// Process API response
 	var result bool
-	err = processPrivateApiResponse(res, &result)
+	err = processAPIResponse(res, &result)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return err
 	}
 	if !result {
@@ -2753,9 +2862,9 @@ func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount
 
 	// Process API response
 	var transfer data.AccountTransfer
-	err = processPrivateApiResponse(res, &transfer)
+	err = processAPIResponse(res, &transfer)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &transfer, nil
@@ -2802,9 +2911,9 @@ func (kc *KrakenClient) AllocateEarnFunds(strategyID string, amount string) erro
 
 	// Process API response
 	var result bool
-	err = processPrivateApiResponse(res, &result)
+	err = processAPIResponse(res, &result)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return err
 	}
 	if !result {
@@ -2851,9 +2960,9 @@ func (kc *KrakenClient) DeallocateEarnFunds(strategyID string, amount string) er
 
 	// Process API response
 	var result bool
-	err = processPrivateApiResponse(res, &result)
+	err = processAPIResponse(res, &result)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return err
 	}
 	if !result {
@@ -2894,9 +3003,9 @@ func (kc *KrakenClient) AllocationStatus(strategyID string) (bool, error) {
 
 	// Process API response
 	var status data.AllocationStatus
-	err = processPrivateApiResponse(res, &status)
+	err = processAPIResponse(res, &status)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return false, err
 	}
 	return status.Pending, nil
@@ -2933,9 +3042,9 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 
 	// Process API response
 	var status data.AllocationStatus
-	err = processPrivateApiResponse(res, &status)
+	err = processAPIResponse(res, &status)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return false, err
 	}
 	return status.Pending, nil
@@ -3010,9 +3119,9 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 
 	// Process API response
 	var strategies data.EarnStrategiesResp
-	err = processPrivateApiResponse(res, &strategies)
+	err = processAPIResponse(res, &strategies)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &strategies, nil
@@ -3064,9 +3173,9 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 
 	// Process API response
 	var allocations data.EarnAllocationsResp
-	err = processPrivateApiResponse(res, &allocations)
+	err = processAPIResponse(res, &allocations)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &allocations, nil
@@ -3106,9 +3215,9 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 
 	// Process API response
 	var token data.WebSocketsToken
-	err = processPrivateApiResponse(res, &token)
+	err = processAPIResponse(res, &token)
 	if err != nil {
-		err = fmt.Errorf("error calling processPrivateApiResponse() | %w", err)
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 	return &token, nil
@@ -3117,6 +3226,32 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 // #endregion
 
 // #region Helper functions
+
+// Processes Kraken API response and unmarshals it into ApiResp data struct.
+// Passed arg 'target' is unmarshalled into ApiResp 'Result' field.
+func processAPIResponse(res *http.Response, target interface{}) error {
+	var err error
+	if res.StatusCode == http.StatusOK {
+		msg, err := io.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+		resp := data.ApiResp{Result: target}
+		err = json.Unmarshal(msg, &resp)
+		if err != nil {
+			err = fmt.Errorf("error unmarshalling msg to resp | %w", err)
+			return err
+		}
+		if len(resp.Error) != 0 {
+			err = fmt.Errorf("api error(s) | %v", resp.Error)
+			return err
+		}
+		return nil
+	} else {
+		err = fmt.Errorf("http status code not OK; status code | %v", res.StatusCode)
+		return err
+	}
+}
 
 // Helper function to parse string 's' to float64 using strconv.ParseFloat() method,
 // returns 0.0 if string is empty and wraps error message if ParseFloat returns err
