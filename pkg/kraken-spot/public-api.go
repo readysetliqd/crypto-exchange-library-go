@@ -81,17 +81,20 @@ func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 }
 
 // Calls Kraken API public market data "Assets" endpoint. Returns a slice of
-// strings of all tradeable asset names
+// strings of all tradeable asset names sorted alphabetically.
 func ListAssets() ([]string, error) {
-	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
-	err := callPublicApi("Assets", &allAssetInfo)
+	allAssetInfo, err := GetAllAssetInfo()
 	if err != nil {
+		err = fmt.Errorf("error calling GetAllAssetInfo() | %w", err)
 		return nil, err
 	}
-	allAssets := []string{}
-	for asset := range allAssetInfo {
-		allAssets = append(allAssets, asset)
+	allAssets := make([]string, len((*allAssetInfo)))
+	i := 0
+	for asset := range *allAssetInfo {
+		allAssets[i] = asset
+		i++
 	}
+	sort.Strings(allAssets)
 	return allAssets, nil
 }
 
