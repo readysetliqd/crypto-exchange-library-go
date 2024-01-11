@@ -501,7 +501,7 @@ func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 			return nil, err
 		}
 		initialCapacity = count[0]
-		if initialCapacity > 500 || count[0] < 1 {
+		if initialCapacity > 500 || initialCapacity < 1 {
 			err := fmt.Errorf("invalid number passed to 'count'. check enum")
 			return nil, err
 		}

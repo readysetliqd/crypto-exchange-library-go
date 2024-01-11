@@ -785,6 +785,186 @@ func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (
 	return &OHLC, nil
 }
 
+// Calls Kraken API public market data "Depth" endpoint. Gets arrays of bids and
+// asks for arg 'pair'. Optional arg 'count' will return count number of each bids
+// and asks. Not passing an arg to 'count' will default to 100.
+//
+// Enum - 'count': [1..500]
+func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	var initialCapacity uint16
+	endpoint := fmt.Sprintf("Depth?pair=%s", pair)
+	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetOrderBook(). expected 1 or 2 including the 'pair' argument")
+			return nil, err
+		}
+		initialCapacity = count[0]
+		if initialCapacity > 500 || initialCapacity < 1 {
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", count[0])
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	orderBook := make(map[string]data.OrderBook, initialCapacity)
+	err = processAPIResponse(res, &orderBook)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+
+	// Add pair name (key) as value
+	var assetInfo data.OrderBook
+	for key := range orderBook {
+		assetInfo = orderBook[key]
+		assetInfo.Ticker = key
+		break
+	}
+	return &assetInfo, nil
+}
+
+// Calls Kraken API public market data "Trades" endpoint. Gets the most
+// recent trades for arg 'pair'. Accepts optional arg 'count' to get 'count'
+// number of recent trades. Not passing an arg to 'count' will default to 1000
+//
+// Enum - 'count': [1..1000]
+func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	endpoint := "Trades?pair=" + pair
+	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetTrades(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		if count[0] > 1000 || count[0] < 1 {
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", count[0])
+	}
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var trades data.TradesResp
+	err = processAPIResponse(res, &trades)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &trades, nil
+}
+
+// Calls Kraken API public market data "Trades" endpoint. Gets the trades after
+// unix time arg 'since' for arg 'pair'. Accepts optional arg 'count' to get
+// 'count' number of trades after 'since'. Not passing an arg to 'count' will
+// default to 1000
+//
+// Enum - 'count': [1..1000]
+func (kc *KrakenClient) GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	endpoint := fmt.Sprintf("Trades?pair=%s&since=%v", pair, since)
+	if len(count) > 0 {
+		if len(count) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetTrades(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		if count[0] > 1000 || count[0] < 1 {
+			err := fmt.Errorf("invalid number passed to 'count'. check enum")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&count=%v", count[0])
+	}
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var trades data.TradesResp
+	err = processAPIResponse(res, &trades)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	return &trades, nil
+}
+
+// Calls Kraken API public market data "Spread" endpoint. Returns the last ~200
+// top-of-book spreads for given arg 'pair'.
+//
+// Note: arg 'since' intended for incremental updates within available dataset
+// (does not contain all historical spreads)
+func (kc *KrakenClient) GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
+	// Build payload
+	payload := url.Values{}
+	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
+
+	// Build endpoint
+	endpoint := "Spread?pair=" + pair
+	if len(since) > 0 {
+		if len(since) > 1 {
+			err := fmt.Errorf("too many arguments passed for func: GetSpread(). excpected 1, or 2 including the 'pair' argument")
+			return nil, err
+		}
+		endpoint += fmt.Sprintf("&since=%v", since[0])
+	}
+
+	// Send request
+	kc.rateLimitAndIncrement(1)
+	res, err := kc.doRequest(publicPrefix+endpoint, payload)
+	if err != nil {
+		err = fmt.Errorf("error sending request to server | %w", err)
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	// Process API response
+	var spreads data.SpreadResp
+	err = processAPIResponse(res, &spreads)
+	if err != nil {
+		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
+		return nil, err
+	}
+	return &spreads, nil
+}
+
 // TODO copy public endpoints as methods for authenticated access
 
 // #endregion
