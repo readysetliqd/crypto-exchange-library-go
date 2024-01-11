@@ -94,7 +94,7 @@ func ListAssets() ([]string, error) {
 		allAssets[i] = asset
 		i++
 	}
-	sort.Strings(allAssets)
+	slices.Sort(allAssets)
 	return allAssets, nil
 }
 
@@ -243,13 +243,15 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 // Calls Kraken API public market data "AssetPairs" endpoint and returns slice
 // of all tradeable pair names. Sorted alphabetically.
 func ListTradeablePairs() ([]string, error) {
-	tradeablePairs := []string{}
 	pairInfo, err := GetTradeablePairsInfo()
+	tradeablePairs := make([]string, len((*pairInfo)))
 	if err != nil {
 		return nil, err
 	}
+	i := 0
 	for pair := range *pairInfo {
-		tradeablePairs = append(tradeablePairs, pair)
+		tradeablePairs[i] = pair
+		i++
 	}
 	slices.Sort(tradeablePairs)
 	return tradeablePairs, nil
