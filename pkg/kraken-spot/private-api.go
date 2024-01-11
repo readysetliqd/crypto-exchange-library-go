@@ -507,6 +507,23 @@ func (kc *KrakenClient) ListTradeablePairs() ([]string, error) {
 	return tradeablePairs, nil
 }
 
+// Calls Kraken API public market data "AssetPairs" endpoint and returns slice
+// of all tradeable pairs' websocket names. Sorted alphabetically.
+func (kc *KrakenClient) ListWebsocketNames() ([]string, error) {
+	pairInfo, err := kc.GetTradeablePairsInfo()
+	if err != nil {
+		return nil, err
+	}
+	websocketNames := make([]string, len((*pairInfo)))
+	i := 0
+	for _, pair := range *pairInfo {
+		websocketNames[i] = pair.Wsname
+		i++
+	}
+	slices.Sort(websocketNames)
+	return websocketNames, nil
+}
+
 // TODO copy public endpoints as methods for authenticated access
 
 // #endregion

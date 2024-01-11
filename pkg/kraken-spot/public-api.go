@@ -264,9 +264,11 @@ func ListWebsocketNames() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	websocketNames := []string{}
-	for pair := range *pairInfo {
-		websocketNames = append(websocketNames, (*pairInfo)[pair].Wsname)
+	websocketNames := make([]string, len((*pairInfo)))
+	i := 0
+	for _, pair := range *pairInfo {
+		websocketNames[i] = pair.Wsname
+		i++
 	}
 	slices.Sort(websocketNames)
 	return websocketNames, nil
