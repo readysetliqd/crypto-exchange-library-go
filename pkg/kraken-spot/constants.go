@@ -4,8 +4,12 @@ const (
 	baseUrl       = "https://api.kraken.com"
 	publicPrefix  = "/0/public/"
 	privatePrefix = "/0/private/"
-	wsPublicURL   = "ws.kraken.com"
-	wsPrivateURL  = "ws-auth.kraken.com"
+	wsPublicURL   = "wss://ws.kraken.com"
+	wsPrivateURL  = "wss://ws-auth.kraken.com"
+)
+
+const (
+	wsTimeoutDuration = 10
 )
 
 const (

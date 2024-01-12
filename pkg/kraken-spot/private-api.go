@@ -3848,9 +3848,9 @@ func (kc *KrakenClient) AuthenticateWebSockets() error {
 		err = fmt.Errorf("error calling getwebsocketstoken() | %w", err)
 		return err
 	}
-	kc.Mutex.Lock()
+	kc.APIMutex.Lock()
 	kc.WebSocketsToken = tokenResp.Token
-	kc.Mutex.Unlock()
+	kc.APIMutex.Unlock()
 	return nil
 }
 
@@ -3889,13 +3889,13 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 // counter cap. If it will, waits for counter to decrement before proceeding
 func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 	if kc.HandleRateLimit {
-		kc.Mutex.Lock()
+		kc.APIMutex.Lock()
 		for kc.APICounter+1 >= kc.MaxAPICounter {
 			log.Println("Counter will exceed rate limit. Waiting")
-			kc.Cond.Wait()
+			kc.CounterDecayCond.Wait()
 		}
 		kc.APICounter += incrementAmount
-		kc.Mutex.Unlock()
+		kc.APIMutex.Unlock()
 	}
 }
 

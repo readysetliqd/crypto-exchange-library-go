@@ -6,21 +6,32 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+
+	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
 var sharedClient = &http.Client{}
 
 type KrakenClient struct {
-	APIKey          string
-	APISecret       []byte
-	Client          *http.Client
+	APIKey    string
+	APISecret []byte
+	Client    *http.Client
+
+	// WebSockets fields
 	WebSocketsToken string
-	HandleRateLimit bool
-	APICounter      uint8
-	MaxAPICounter   uint8
-	APICounterDecay uint8
-	Mutex           sync.Mutex
-	Cond            *sync.Cond
+	WebSocketClient *websocket.Conn
+	WebSocketsMutex sync.RWMutex
+	TickerChannels  map[string]chan data.WSTickerResp
+
+	// General API self rate limiting fields
+	HandleRateLimit  bool
+	APICounter       uint8
+	MaxAPICounter    uint8
+	APICounterDecay  uint8
+	APIMutex         sync.Mutex
+	CounterDecayCond *sync.Cond
 }
 
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
@@ -65,9 +76,10 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		MaxAPICounter:   maxCounter,
 		APICounterDecay: decayRate,
 	}
+	kc.TickerChannels = make(map[string]chan data.WSTickerResp)
 	if handleRateLimit {
 		go kc.startRateLimiter()
-		kc.Cond = sync.NewCond(&kc.Mutex)
+		kc.CounterDecayCond = sync.NewCond(&kc.APIMutex)
 	}
 	return kc, nil
 }
@@ -78,11 +90,11 @@ func (kc *KrakenClient) startRateLimiter() {
 	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
 	defer ticker.Stop()
 	for range ticker.C {
-		kc.Mutex.Lock()
+		kc.APIMutex.Lock()
 		if kc.APICounter > 0 {
 			kc.APICounter -= 1
 		}
-		kc.Mutex.Unlock()
-		kc.Cond.Broadcast()
+		kc.APIMutex.Unlock()
+		kc.CounterDecayCond.Broadcast()
 	}
 }

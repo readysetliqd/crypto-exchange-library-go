@@ -826,11 +826,76 @@ type EarnAlloReward struct {
 
 // #endregion
 
-// #region Private Websocket Authentication Data structs
+// #region Private WebSockets Authentication Data structs
 
 type WebSocketsToken struct {
 	Token   string `json:"token"`
 	Expires uint16 `json:"expires"`
+}
+
+// #endregion
+
+// #region Public WebSockets data structs
+
+type WSConnection struct {
+	ConnectionID int    `json:"connectionID"`
+	Event        string `json:"event"`
+	Status       string `json:"status"`
+	Version      string `json:"version"`
+}
+
+type WSSubscriptionStatus struct {
+	ChannelID    int            `json:"channelID"`
+	ErrorMessage string         `json:"errorMessage"`
+	ChannelName  string         `json:"channelName"`
+	Event        string         `json:"event"`
+	RequestID    int            `json:"reqid"`
+	Status       string         `json:"status"`
+	Subscription WSSubscription `json:"subscription"`
+}
+
+type WSSubscription struct {
+	Depth        int    `json:"depth"`
+	Interval     int    `json:"interval"`
+	MaxRateCount int    `json:"maxratecount"`
+	Name         string `json:"name"`
+	Token        string `json:"token"`
+}
+
+type WSTickerResp struct {
+	ChannelID   int `json:"channelID"`
+	WSTicker    WSTicker
+	ChannelName string `json:"channelName"`
+	Pair        string `json:"pair"`
+}
+
+type WSTicker struct {
+	Ticker          string
+	Ask             WSTickerBook      `json:"a"`
+	Bid             WSTickerBook      `json:"b"`
+	LastTradeClosed WSTickerLastTrade `json:"c"`
+	Volume          WSTickerDaily     `json:"v"`
+	VWAP            WSTickerDaily     `json:"p"`
+	NumberOfTrades  WSTickerDaily     `json:"t"`
+	Low             WSTickerDaily     `json:"l"`
+	High            WSTickerDaily     `json:"h"`
+	Open            WSTickerDaily     `json:"o"`
+}
+
+type WSTickerBook struct {
+	Price          float64 `json:"price"`
+	WholeLotVolume uint64  `json:"wholeLotVolume"`
+	LotVolume      float64 `json:"lotVolume"`
+}
+
+type WSTickerLastTrade struct {
+	Price     float64 `json:"price"`
+	LotVolume float64 `json:"lotVolume"`
+}
+
+type WSTickerDaily struct {
+	Today       float64 `json:"today"`
+	Last24Hours float64 `json:"last24Hours"`
 }
 
 // #endregion
