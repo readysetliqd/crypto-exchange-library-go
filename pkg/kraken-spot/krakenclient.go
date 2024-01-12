@@ -23,8 +23,29 @@ type KrakenClient struct {
 	Cond            *sync.Cond
 }
 
-// TODO document inputs and enums
-// Creates new authenticated client KrakenClient for Kraken API
+// Creates new authenticated client KrakenClient for Kraken API with keys passed
+// to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier' but
+// is only used if 'handleRateLimit' is set to "true". Arg 'handleRateLimit' will
+// allow the client to self rate limit for general API calls. This currently has no
+// ability to rate limit Trading endpoint calls (such as AddOrder(), EditOrder(),
+// or CancelOrder()). This feature adds processing overhead so it should be set to
+// "false" if many consecutive general API calls won't be made, or if the application
+// importing this package is either performance critical or handling rate limiting
+// itself.
+//
+// Verification Tiers:
+//
+// 1. Starter
+//
+// 2. Intermediate
+//
+// 3. Pro
+//
+// # Enum:
+//
+// 'verificationTier': [1..3]
+//
+// 'handleRateLimit': true, false
 func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRateLimit bool) (*KrakenClient, error) {
 	decodedSecret, err := base64.StdEncoding.DecodeString(apiSecret)
 	if err != nil {
