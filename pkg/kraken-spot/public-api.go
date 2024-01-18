@@ -9,14 +9,12 @@ import (
 	"slices"
 	"sort"
 	"strconv"
-
-	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
 // Calls Kraken API public market data "Time" endpoint. Gets the server's time.
-// data.ServerTime struct
-func GetServerTime() (*data.ServerTime, error) {
-	serverTime := &data.ServerTime{}
+// ServerTime struct
+func GetServerTime() (*ServerTime, error) {
+	serverTime := &ServerTime{}
 	err := callPublicApi("Time", serverTime)
 	if err != nil {
 		return nil, err
@@ -32,8 +30,8 @@ func GetServerTime() (*data.ServerTime, error) {
 //	status, err := krakenspot.GetSystemStatus()
 //	log.Println(status.Status)
 //	log.Println(status.Timestamp)
-func GetSystemStatus() (*data.SystemStatus, error) {
-	systemStatus := &data.SystemStatus{}
+func GetSystemStatus() (*SystemStatus, error) {
+	systemStatus := &SystemStatus{}
 	err := callPublicApi("SystemStatus", systemStatus)
 	if err != nil {
 		return nil, err
@@ -65,9 +63,9 @@ func SystemIsOnline() (bool, string) {
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // all assets that are available for deposit, withdrawal, trading and staking.
-// Returns them as *map[string]data.AssetInfo where the string is the asset name.
-func GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
-	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
+// Returns them as *map[string]AssetInfo where the string is the asset name.
+func GetAllAssetInfo() (*map[string]AssetInfo, error) {
+	allAssetInfo := make(map[string]AssetInfo, assetsMapSize)
 	err := callPublicApi("Assets", &allAssetInfo)
 	if err != nil {
 		return nil, err
@@ -100,8 +98,8 @@ func ListAssets() ([]string, error) {
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // specific asset passed to arg.
-func GetAssetInfo(asset string) (*data.AssetInfo, error) {
-	assetInfo := make(map[string]data.AssetInfo)
+func GetAssetInfo(asset string) (*AssetInfo, error) {
+	assetInfo := make(map[string]AssetInfo)
 	endpoint := "Assets?asset=" + asset
 	err := callPublicApi(endpoint, &assetInfo)
 	if err != nil {
@@ -121,7 +119,7 @@ func GetAssetInfo(asset string) (*data.AssetInfo, error) {
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, error) {
+func GetTradeablePairsInfo(pair ...string) (*map[string]AssetPairInfo, error) {
 	var initialCapacity int
 	endpoint := "AssetPairs"
 	if len(pair) > 0 {
@@ -134,7 +132,7 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 	} else {
 		initialCapacity = pairsMapSize
 	}
-	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
+	pairInfo := make(map[string]AssetPairInfo, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
@@ -152,7 +150,7 @@ func GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, erro
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, error) {
+func GetTradeablePairsMargin(pair ...string) (*map[string]AssetPairMargin, error) {
 	var initialCapacity int
 	endpoint := "AssetPairs?info=margin"
 	if len(pair) > 0 {
@@ -165,7 +163,7 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 	} else {
 		initialCapacity = pairsMapSize
 	}
-	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
+	pairInfo := make(map[string]AssetPairMargin, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
@@ -183,7 +181,7 @@ func GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, 
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, error) {
+func GetTradeablePairsFees(pair ...string) (*map[string]AssetPairFees, error) {
 	var initialCapacity int
 	endpoint := "AssetPairs?info=fees"
 	if len(pair) > 0 {
@@ -196,7 +194,7 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 	} else {
 		initialCapacity = pairsMapSize
 	}
-	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
+	pairInfo := make(map[string]AssetPairFees, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
@@ -214,7 +212,7 @@ func GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, erro
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLeverage, error) {
+func GetTradeablePairsLeverage(pair ...string) (*map[string]AssetPairLeverage, error) {
 	var initialCapacity int
 	endpoint := "AssetPairs?info=leverage"
 	if len(pair) > 0 {
@@ -227,7 +225,7 @@ func GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLevera
 	} else {
 		initialCapacity = pairsMapSize
 	}
-	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
+	pairInfo := make(map[string]AssetPairLeverage, initialCapacity)
 	err := callPublicApi(endpoint, &pairInfo)
 	if err != nil {
 		return nil, err
@@ -310,10 +308,10 @@ func MapWebsocketNames() (map[string]bool, error) {
 // one comma delimited string into the pair argument.
 //
 // Note: Today's prices start at midnight UTC
-func GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
+func GetTickerInfo(pair string) (*map[string]TickerInfo, error) {
 	initialCapacity := 1
 	endpoint := "Ticker?pair=" + pair
-	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	tickers := make(map[string]TickerInfo, initialCapacity)
 	err := callPublicApi(endpoint, &tickers)
 	if err != nil {
 		return nil, err
@@ -330,10 +328,10 @@ func GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
 // all tradeable pairs.
 //
 // Note: Today's prices start at midnight UTC
-func GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
+func GetAllTickerInfo() (*map[string]TickerInfo, error) {
 	initialCapacity := pairsMapSize
 	endpoint := "Ticker"
-	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	tickers := make(map[string]TickerInfo, initialCapacity)
 	err := callPublicApi(endpoint, &tickers)
 	if err != nil {
 		return nil, err
@@ -351,12 +349,12 @@ func GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
 // function without passing a value to arg num will return the entire list
 // of sorted pairs. Passing a value to num will return a slice of the top num
 // sorted pairs.
-func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
+func ListTopVolumeLast24Hours(num ...uint16) ([]TickerVolume, error) {
 	if len(num) > 1 {
 		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 		return nil, err
 	}
-	topVolumeTickers := make([]data.TickerVolume, 0, tickersMapSize)
+	topVolumeTickers := make([]TickerVolume, 0, tickersMapSize)
 	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
@@ -380,14 +378,14 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 				if err != nil {
 					return nil, err
 				}
-				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				// Handle cases where USD is base currency
 			} else if (*allPairs)[ticker].Base == "ZUSD" {
 				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
-				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: volume})
+				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: volume})
 			} else {
 				// Find matching pair with base and quote USD equivalent to normalize to USD volume
 				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
@@ -395,26 +393,26 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				} else if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"USD"]; ok {
 					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"USD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 					// Handle edge cases specific to Kraken API base not matching data in tickers
 				} else if (*allPairs)[ticker].Base == "XXDG" {
 					volume, vwap, err := parseVolumeVwap(ticker, "XDGUSD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				} else if (*allPairs)[ticker].Base == "ZAUD" {
 					volume, vwap, err := parseVolumeVwap(ticker, "AUDUSD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				}
 			}
 		}
@@ -436,19 +434,19 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
 // this function without passing a value to arg num will return the entire list
 // of sorted pairs. Passing a value to num will return a slice of the top num
 // sorted pairs.
-func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) {
+func ListTopNumberTradesLast24Hours(num ...uint16) ([]TickerTrades, error) {
 	if len(num) > 1 {
 		err := fmt.Errorf("too many arguments passed into ListTopNumberTradesLast24Hours(). excpected 0 or 1")
 		return nil, err
 	}
-	topTradesTickers := make([]data.TickerTrades, 0, tickersMapSize)
+	topTradesTickers := make([]TickerTrades, 0, tickersMapSize)
 	tickers, err := GetAllTickerInfo()
 	if err != nil {
 		return nil, err
 	}
 	for ticker := range *tickers {
 		numTrades := (*tickers)[ticker].NumberOfTrades.Last24Hours
-		topTradesTickers = append(topTradesTickers, data.TickerTrades{Ticker: ticker, NumTrades: numTrades})
+		topTradesTickers = append(topTradesTickers, TickerTrades{Ticker: ticker, NumTrades: numTrades})
 	}
 	sort.Slice(topTradesTickers, func(i, j int) bool {
 		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
@@ -464,13 +462,13 @@ func ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) 
 // Calls Kraken API public market data "OHLC" endpoint. Gets OHLC data for
 // specified pair of the required interval (in minutes).
 //
-// Accepts optional arg since as a start time in Unix for the data. However,
+// Accepts optional arg since as a start time in Unix for the  However,
 // per the Kraken API docs "Note: the last entry in the OHLC array is for the
 // current, not-yet-committed frame and will always be present, regardless of
 // the value of since.
 //
 // Enum - 'interval': 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
-func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
+func GetOHLC(pair string, interval uint16, since ...uint64) (*OHLCResp, error) {
 	endpoint := fmt.Sprintf("OHLC?pair=%s&interval=%v", pair, interval)
 	if len(since) > 0 {
 		if len(since) > 1 {
@@ -479,7 +477,7 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 		}
 		endpoint += fmt.Sprintf("&since=%v", since)
 	}
-	var OHLC data.OHLCResp
+	var OHLC OHLCResp
 	err := callPublicApi(endpoint, &OHLC)
 	if err != nil {
 		return nil, err
@@ -492,7 +490,7 @@ func GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, err
 // and asks. Not passing an arg to 'count' will default to 100.
 //
 // Enum - 'count': [1..500]
-func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
+func GetOrderBook(pair string, count ...uint16) (*OrderBook, error) {
 	var initialCapacity uint16
 	endpoint := fmt.Sprintf("Depth?pair=%s", pair)
 	if len(count) > 0 {
@@ -507,9 +505,9 @@ func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 		}
 		endpoint += fmt.Sprintf("&count=%v", count[0])
 	}
-	orderBook := make(map[string]data.OrderBook, initialCapacity)
+	orderBook := make(map[string]OrderBook, initialCapacity)
 	callPublicApi(endpoint, &orderBook)
-	var assetInfo data.OrderBook
+	var assetInfo OrderBook
 	for key := range orderBook {
 		assetInfo = orderBook[key]
 		assetInfo.Ticker = key
@@ -523,7 +521,7 @@ func GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
 // number of recent trades. Not passing an arg to 'count' will default to 1000
 //
 // Enum - 'count': [1..1000]
-func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
+func GetTrades(pair string, count ...uint16) (*TradesResp, error) {
 	var initialCapacity uint16
 	endpoint := "Trades?pair=" + pair
 	if len(count) > 0 {
@@ -540,7 +538,7 @@ func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
 	} else {
 		initialCapacity = 1000
 	}
-	trades := data.TradesResp{}
+	trades := TradesResp{}
 	err := callPublicApi(endpoint, &trades)
 	if err != nil {
 		return nil, err
@@ -554,7 +552,7 @@ func GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
 // default to 1000
 //
 // Enum - 'count': [1..1000]
-func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesResp, error) {
+func GetTradesSince(pair string, since uint64, count ...uint16) (*TradesResp, error) {
 	var initialCapacity uint16
 	endpoint := fmt.Sprintf("Trades?pair=%s&since=%v", pair, since)
 	if len(count) > 0 {
@@ -571,7 +569,7 @@ func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesRes
 	} else {
 		initialCapacity = 1000
 	}
-	trades := data.TradesResp{}
+	trades := TradesResp{}
 	err := callPublicApi(endpoint, &trades)
 	if err != nil {
 		return nil, err
@@ -584,7 +582,7 @@ func GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesRes
 //
 // Note: arg 'since' intended for incremental updates within available dataset
 // (does not contain all historical spreads)
-func GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
+func GetSpread(pair string, since ...uint64) (*SpreadResp, error) {
 	endpoint := "Spread?pair=" + pair
 	if len(since) > 0 {
 		if len(since) > 1 {
@@ -593,7 +591,7 @@ func GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
 		}
 		endpoint += fmt.Sprintf("&since=%v", since[0])
 	}
-	var resp data.SpreadResp
+	var resp SpreadResp
 	err := callPublicApi(endpoint, &resp)
 	if err != nil {
 		return nil, err
@@ -613,7 +611,7 @@ func callPublicApi(endpoint string, target interface{}) error {
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusOK {
-		resp := data.ApiResp{Result: target}
+		resp := ApiResp{Result: target}
 		msg, err := io.ReadAll(res.Body)
 		if err != nil {
 			return fmt.Errorf("error calling io.readall | %v", err)
@@ -632,7 +630,7 @@ func callPublicApi(endpoint string, target interface{}) error {
 }
 
 // Parses volume and VWAP from tickers using ticker for volume and pair for VWAP
-func parseVolumeVwap(ticker string, pair string, tickers *map[string]data.TickerInfo) (float64, float64, error) {
+func parseVolumeVwap(ticker string, pair string, tickers *map[string]TickerInfo) (float64, float64, error) {
 	volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
 	if err != nil {
 		return 0, 0, err

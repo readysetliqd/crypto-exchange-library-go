@@ -1,5 +1,6 @@
 package krakenspot
 
+// URL constants
 const (
 	baseUrl       = "https://api.kraken.com"
 	publicPrefix  = "/0/public/"
@@ -8,15 +9,50 @@ const (
 	wsPrivateURL  = "wss://ws-auth.kraken.com"
 )
 
-const (
-	wsTimeoutDuration = 10
-)
+// const (
+// 	wsTimeoutDuration = time.Second * 10
+// )
+
+// #region WebSocket constants
+
+var heartbeat = []byte{123, 34, 101, 118, 101, 110, 116, 34, 58, 34, 104, 101, 97, 114, 116, 98, 101, 97, 116, 34, 125}
+
+var publicChannelNames = map[string]bool{
+	"ticker": true,
+	"ohlc":   true,
+	"trade":  true,
+	"spread": true,
+	"book":   true,
+}
+
+var privateChannelNames = map[string]bool{
+	"ownTrades":  true,
+	"openOrders": true,
+}
+
+var orderChannelEvents = map[string]bool{
+	"addOrderStatus":             true,
+	"editOrderStatus":            true,
+	"cancelOrderStatus":          true,
+	"cancelAllStatus":            true,
+	"cancelAllOrdersAfterStatus": true,
+}
+
+var generalMessageEvents = map[string]bool{
+	"systemStatus":       true,
+	"subscriptionStatus": true,
+	"pong":               true,
+}
+
+// #endregion
 
 const (
 	pairsMapSize   = 745 // As of 12/29/2023 there were 677 tradeable pairs. 10% added for buffer
 	assetsMapSize  = 321 // As of 12/29/2023 there were 292 listed assets. 10% added for buffer
 	tickersMapSize = 813 // As of 12/29/2023 there were 739 listed tickers. 10% added for buffer
 )
+
+// #region API rate limiter constants
 
 const (
 	tier1DecayRate  uint8 = 3 // seconds per 1 counter decay
@@ -38,6 +74,8 @@ var maxCounterMap = map[uint8]uint8{
 	2: tier2MaxCounter,
 	3: tier3MaxCounter,
 }
+
+// #endregion
 
 // Formatting for number of decimals for USD (ZUSD) asset on Kraken
 const usdDecimalsFormat = "%.4f"

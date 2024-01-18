@@ -17,15 +17,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
 // #region Public Market Data endpoints
 
 // Calls Kraken API public market data "Time" endpoint. Gets the server's time.
-// data.ServerTime struct
-func (kc *KrakenClient) GetServerTime() (*data.ServerTime, error) {
+// ServerTime struct
+func (kc *KrakenClient) GetServerTime() (*ServerTime, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -40,7 +38,7 @@ func (kc *KrakenClient) GetServerTime() (*data.ServerTime, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var systemStatus data.ServerTime
+	var systemStatus ServerTime
 	err = processAPIResponse(res, &systemStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -58,7 +56,7 @@ func (kc *KrakenClient) GetServerTime() (*data.ServerTime, error) {
 //	status, err := krakenspot.GetSystemStatus()
 //	log.Println(status.Status)
 //	log.Println(status.Timestamp)
-func (kc *KrakenClient) GetSystemStatus() (*data.SystemStatus, error) {
+func (kc *KrakenClient) GetSystemStatus() (*SystemStatus, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -73,7 +71,7 @@ func (kc *KrakenClient) GetSystemStatus() (*data.SystemStatus, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var systemStatus data.SystemStatus
+	var systemStatus SystemStatus
 	err = processAPIResponse(res, &systemStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -107,8 +105,8 @@ func (kc *KrakenClient) SystemIsOnline() (bool, string) {
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // all assets that are available for deposit, withdrawal, trading and staking.
-// Returns them as *map[string]data.AssetInfo where the string is the asset name.
-func (kc *KrakenClient) GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
+// Returns them as *map[string]AssetInfo where the string is the asset name.
+func (kc *KrakenClient) GetAllAssetInfo() (*map[string]AssetInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -123,7 +121,7 @@ func (kc *KrakenClient) GetAllAssetInfo() (*map[string]data.AssetInfo, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	allAssetInfo := make(map[string]data.AssetInfo, assetsMapSize)
+	allAssetInfo := make(map[string]AssetInfo, assetsMapSize)
 	err = processAPIResponse(res, &allAssetInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -157,7 +155,7 @@ func (kc *KrakenClient) ListAssets() ([]string, error) {
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
 // specific asset passed to arg.
-func (kc *KrakenClient) GetAssetInfo(asset string) (*data.AssetInfo, error) {
+func (kc *KrakenClient) GetAssetInfo(asset string) (*AssetInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -173,7 +171,7 @@ func (kc *KrakenClient) GetAssetInfo(asset string) (*data.AssetInfo, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	assetInfo := make(map[string]data.AssetInfo)
+	assetInfo := make(map[string]AssetInfo)
 	err = processAPIResponse(res, &assetInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -193,7 +191,7 @@ func (kc *KrakenClient) GetAssetInfo(asset string) (*data.AssetInfo, error) {
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func (kc *KrakenClient) GetTradeablePairsInfo(pair ...string) (*map[string]data.AssetPairInfo, error) {
+func (kc *KrakenClient) GetTradeablePairsInfo(pair ...string) (*map[string]AssetPairInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -222,7 +220,7 @@ func (kc *KrakenClient) GetTradeablePairsInfo(pair ...string) (*map[string]data.
 	defer res.Body.Close()
 
 	// Process API response
-	pairInfo := make(map[string]data.AssetPairInfo, initialCapacity)
+	pairInfo := make(map[string]AssetPairInfo, initialCapacity)
 	err = processAPIResponse(res, &pairInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -242,7 +240,7 @@ func (kc *KrakenClient) GetTradeablePairsInfo(pair ...string) (*map[string]data.
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func (kc *KrakenClient) GetTradeablePairsMargin(pair ...string) (*map[string]data.AssetPairMargin, error) {
+func (kc *KrakenClient) GetTradeablePairsMargin(pair ...string) (*map[string]AssetPairMargin, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -271,7 +269,7 @@ func (kc *KrakenClient) GetTradeablePairsMargin(pair ...string) (*map[string]dat
 	defer res.Body.Close()
 
 	// Process API response
-	pairInfo := make(map[string]data.AssetPairMargin, initialCapacity)
+	pairInfo := make(map[string]AssetPairMargin, initialCapacity)
 	err = processAPIResponse(res, &pairInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -291,7 +289,7 @@ func (kc *KrakenClient) GetTradeablePairsMargin(pair ...string) (*map[string]dat
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func (kc *KrakenClient) GetTradeablePairsFees(pair ...string) (*map[string]data.AssetPairFees, error) {
+func (kc *KrakenClient) GetTradeablePairsFees(pair ...string) (*map[string]AssetPairFees, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -320,7 +318,7 @@ func (kc *KrakenClient) GetTradeablePairsFees(pair ...string) (*map[string]data.
 	defer res.Body.Close()
 
 	// Process API response
-	pairInfo := make(map[string]data.AssetPairFees, initialCapacity)
+	pairInfo := make(map[string]AssetPairFees, initialCapacity)
 	err = processAPIResponse(res, &pairInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -340,7 +338,7 @@ func (kc *KrakenClient) GetTradeablePairsFees(pair ...string) (*map[string]data.
 // asset pairs. Accepts one optional argument for the "pair" query parameter. If
 // multiple pairs are desired, pass them as one comma delimited string into the
 // pair argument.
-func (kc *KrakenClient) GetTradeablePairsLeverage(pair ...string) (*map[string]data.AssetPairLeverage, error) {
+func (kc *KrakenClient) GetTradeablePairsLeverage(pair ...string) (*map[string]AssetPairLeverage, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -369,7 +367,7 @@ func (kc *KrakenClient) GetTradeablePairsLeverage(pair ...string) (*map[string]d
 	defer res.Body.Close()
 
 	// Process API response
-	pairInfo := make(map[string]data.AssetPairLeverage, initialCapacity)
+	pairInfo := make(map[string]AssetPairLeverage, initialCapacity)
 	err = processAPIResponse(res, &pairInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -454,7 +452,7 @@ func (kc *KrakenClient) MapWebsocketNames() (map[string]bool, error) {
 // one comma delimited string into the pair argument.
 //
 // Note: Today's prices start at midnight UTC
-func (kc *KrakenClient) GetTickerInfo(pair string) (*map[string]data.TickerInfo, error) {
+func (kc *KrakenClient) GetTickerInfo(pair string) (*map[string]TickerInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -471,7 +469,7 @@ func (kc *KrakenClient) GetTickerInfo(pair string) (*map[string]data.TickerInfo,
 
 	// Process API response
 	initialCapacity := 1
-	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	tickers := make(map[string]TickerInfo, initialCapacity)
 	err = processAPIResponse(res, &tickers)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -490,12 +488,12 @@ func (kc *KrakenClient) GetTickerInfo(pair string) (*map[string]data.TickerInfo,
 // function without passing a value to arg num will return the entire list
 // of sorted pairs. Passing a value to num will return a slice of the top num
 // sorted pairs.
-func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVolume, error) {
+func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]TickerVolume, error) {
 	if len(num) > 1 {
 		err := fmt.Errorf("too many arguments passed into getalltradeablepairs(). excpected 0 or 1")
 		return nil, err
 	}
-	topVolumeTickers := make([]data.TickerVolume, 0, tickersMapSize)
+	topVolumeTickers := make([]TickerVolume, 0, tickersMapSize)
 	tickers, err := kc.GetAllTickerInfo()
 	if err != nil {
 		return nil, err
@@ -519,14 +517,14 @@ func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVo
 				if err != nil {
 					return nil, err
 				}
-				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				// Handle cases where USD is base currency
 			} else if (*allPairs)[ticker].Base == "ZUSD" {
 				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
-				topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: volume})
+				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: volume})
 			} else {
 				// Find matching pair with base and quote USD equivalent to normalize to USD volume
 				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
@@ -534,26 +532,26 @@ func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVo
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				} else if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"USD"]; ok {
 					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"USD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 					// Handle edge cases specific to Kraken API base not matching data in tickers
 				} else if (*allPairs)[ticker].Base == "XXDG" {
 					volume, vwap, err := parseVolumeVwap(ticker, "XDGUSD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				} else if (*allPairs)[ticker].Base == "ZAUD" {
 					volume, vwap, err := parseVolumeVwap(ticker, "AUDUSD", tickers)
 					if err != nil {
 						return nil, err
 					}
-					topVolumeTickers = append(topVolumeTickers, data.TickerVolume{Ticker: ticker, Volume: vwap * volume})
+					topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				}
 			}
 		}
@@ -574,7 +572,7 @@ func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]data.TickerVo
 // all tradeable pairs.
 //
 // Note: Today's prices start at midnight UTC
-func (kc *KrakenClient) GetAllTickerInfo() (*map[string]data.TickerInfo, error) {
+func (kc *KrakenClient) GetAllTickerInfo() (*map[string]TickerInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -591,7 +589,7 @@ func (kc *KrakenClient) GetAllTickerInfo() (*map[string]data.TickerInfo, error) 
 
 	// Process API response
 	initialCapacity := pairsMapSize
-	tickers := make(map[string]data.TickerInfo, initialCapacity)
+	tickers := make(map[string]TickerInfo, initialCapacity)
 	err = processAPIResponse(res, &tickers)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -610,19 +608,19 @@ func (kc *KrakenClient) GetAllTickerInfo() (*map[string]data.TickerInfo, error) 
 // this function without passing a value to arg num will return the entire list
 // of sorted pairs. Passing a value to num will return a slice of the top num
 // sorted pairs.
-func (kc *KrakenClient) ListTopNumberTradesLast24Hours(num ...uint16) ([]data.TickerTrades, error) {
+func (kc *KrakenClient) ListTopNumberTradesLast24Hours(num ...uint16) ([]TickerTrades, error) {
 	if len(num) > 1 {
 		err := fmt.Errorf("too many arguments passed into ListTopNumberTradesLast24Hours(). excpected 0 or 1")
 		return nil, err
 	}
-	topTradesTickers := make([]data.TickerTrades, 0, tickersMapSize)
+	topTradesTickers := make([]TickerTrades, 0, tickersMapSize)
 	tickers, err := kc.GetAllTickerInfo()
 	if err != nil {
 		return nil, err
 	}
 	for ticker := range *tickers {
 		numTrades := (*tickers)[ticker].NumberOfTrades.Last24Hours
-		topTradesTickers = append(topTradesTickers, data.TickerTrades{Ticker: ticker, NumTrades: numTrades})
+		topTradesTickers = append(topTradesTickers, TickerTrades{Ticker: ticker, NumTrades: numTrades})
 	}
 	sort.Slice(topTradesTickers, func(i, j int) bool {
 		return topTradesTickers[i].NumTrades > topTradesTickers[j].NumTrades
@@ -638,13 +636,13 @@ func (kc *KrakenClient) ListTopNumberTradesLast24Hours(num ...uint16) ([]data.Ti
 // Calls Kraken API public market data "OHLC" endpoint. Gets OHLC data for
 // specified pair of the required interval (in minutes).
 //
-// Accepts optional arg since as a start time in Unix for the data. However,
+// Accepts optional arg since as a start time in Unix for the  However,
 // per the Kraken API docs "Note: the last entry in the OHLC array is for the
 // current, not-yet-committed frame and will always be present, regardless of
 // the value of since.
 //
 // Enum - 'interval': 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
-func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (*data.OHLCResp, error) {
+func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (*OHLCResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -669,7 +667,7 @@ func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (
 	defer res.Body.Close()
 
 	// Process API response
-	var OHLC data.OHLCResp
+	var OHLC OHLCResp
 	err = processAPIResponse(res, &OHLC)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -683,7 +681,7 @@ func (kc *KrakenClient) GetOHLC(pair string, interval uint16, since ...uint64) (
 // and asks. Not passing an arg to 'count' will default to 100.
 //
 // Enum - 'count': [1..500]
-func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*data.OrderBook, error) {
+func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*OrderBook, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -714,7 +712,7 @@ func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*data.OrderB
 	defer res.Body.Close()
 
 	// Process API response
-	orderBook := make(map[string]data.OrderBook, initialCapacity)
+	orderBook := make(map[string]OrderBook, initialCapacity)
 	err = processAPIResponse(res, &orderBook)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -722,7 +720,7 @@ func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*data.OrderB
 	}
 
 	// Add pair name (key) as value
-	var assetInfo data.OrderBook
+	var assetInfo OrderBook
 	for key := range orderBook {
 		assetInfo = orderBook[key]
 		assetInfo.Ticker = key
@@ -736,7 +734,7 @@ func (kc *KrakenClient) GetOrderBook(pair string, count ...uint16) (*data.OrderB
 // number of recent trades. Not passing an arg to 'count' will default to 1000
 //
 // Enum - 'count': [1..1000]
-func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*data.TradesResp, error) {
+func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*TradesResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -764,7 +762,7 @@ func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*data.TradesRes
 	defer res.Body.Close()
 
 	// Process API response
-	var trades data.TradesResp
+	var trades TradesResp
 	err = processAPIResponse(res, &trades)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -782,7 +780,7 @@ func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*data.TradesRes
 // default to 1000
 //
 // Enum - 'count': [1..1000]
-func (kc *KrakenClient) GetTradesSince(pair string, since uint64, count ...uint16) (*data.TradesResp, error) {
+func (kc *KrakenClient) GetTradesSince(pair string, since uint64, count ...uint16) (*TradesResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -810,7 +808,7 @@ func (kc *KrakenClient) GetTradesSince(pair string, since uint64, count ...uint1
 	defer res.Body.Close()
 
 	// Process API response
-	var trades data.TradesResp
+	var trades TradesResp
 	err = processAPIResponse(res, &trades)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -824,7 +822,7 @@ func (kc *KrakenClient) GetTradesSince(pair string, since uint64, count ...uint1
 //
 // Note: arg 'since' intended for incremental updates within available dataset
 // (does not contain all historical spreads)
-func (kc *KrakenClient) GetSpread(pair string, since ...uint64) (*data.SpreadResp, error) {
+func (kc *KrakenClient) GetSpread(pair string, since ...uint64) (*SpreadResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -849,7 +847,7 @@ func (kc *KrakenClient) GetSpread(pair string, since ...uint64) (*data.SpreadRes
 	defer res.Body.Close()
 
 	// Process API response
-	var spreads data.SpreadResp
+	var spreads SpreadResp
 	err = processAPIResponse(res, &spreads)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -857,8 +855,6 @@ func (kc *KrakenClient) GetSpread(pair string, since ...uint64) (*data.SpreadRes
 	}
 	return &spreads, nil
 }
-
-// TODO copy public endpoints as methods for authenticated access
 
 // #endregion
 
@@ -912,7 +908,7 @@ func (kc *KrakenClient) TotalUSDBalance() (float64, error) {
 // # Required Permissions:
 //
 // Funding Permissions - Query;
-func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance, error) {
+func (kc *KrakenClient) GetExtendedBalances() (*map[string]ExtendedBalance, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 
@@ -923,7 +919,7 @@ func (kc *KrakenClient) GetExtendedBalances() (*map[string]data.ExtendedBalance,
 		return nil, err
 	}
 	defer res.Body.Close()
-	var balances map[string]data.ExtendedBalance
+	var balances map[string]ExtendedBalance
 	err = processAPIResponse(res, &balances)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1032,7 +1028,7 @@ func (kc *KrakenClient) AvailableUSDBalance() (float64, error) {
 // Funding Permissions - Query;
 //
 // Order and Trades - Query open orders & trades
-func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, error) {
+func (kc *KrakenClient) GetTradeBalance(asset ...string) (*TradeBalance, error) {
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
 	if len(asset) > 0 {
@@ -1049,7 +1045,7 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 		return nil, err
 	}
 	defer res.Body.Close()
-	var balance data.TradeBalance
+	var balance TradeBalance
 	err = processAPIResponse(res, &balance)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1079,7 +1075,7 @@ func (kc *KrakenClient) GetTradeBalance(asset ...string) (*data.TradeBalance, er
 // # Example Usage:
 //
 //	orders, err := kc.GetOpenOrders(krakenspot.OOWithTrades(true), krakenspot.OOWithUserRef(123))
-func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.OpenOrdersResp, error) {
+func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*OpenOrdersResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1097,7 +1093,7 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 	defer res.Body.Close()
 
 	// Process API response
-	var openOrders data.OpenOrdersResp
+	var openOrders OpenOrdersResp
 	err = processAPIResponse(res, &openOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1117,7 +1113,7 @@ func (kc *KrakenClient) GetOpenOrders(options ...GetOpenOrdersOption) (*data.Ope
 // # Example Usage:
 //
 //	orders, err := kc.GetOpenOrdersForPair("SOLUSD")
-func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]data.Order, error) {
+func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]Order, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1132,14 +1128,14 @@ func (kc *KrakenClient) GetOpenOrdersForPair(pair string) (*map[string]data.Orde
 	defer res.Body.Close()
 
 	// Process API response
-	var openOrders data.OpenOrdersResp
+	var openOrders OpenOrdersResp
 	err = processAPIResponse(res, &openOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 
-	pairOpenOrders := make(map[string]data.Order)
+	pairOpenOrders := make(map[string]Order)
 	for txid, order := range openOrders.OpenOrders {
 		if order.Description.Pair == pair {
 			pairOpenOrders[txid] = order
@@ -1175,7 +1171,7 @@ func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var openOrders data.OpenOrdersResp
+	var openOrders OpenOrdersResp
 	err = processAPIResponse(res, &openOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1237,7 +1233,7 @@ func (kc *KrakenClient) ListOpenTxIDsForPair(pair string) ([]string, error) {
 // # Example Usage:
 //
 //	orders, err := kc.GetClosedOrders(krakenspot.COWithConsolidateTaker(true), krakenspot.COWithCloseTime("open"))
-func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data.ClosedOrdersResp, error) {
+func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*ClosedOrdersResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1255,7 +1251,7 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 	defer res.Body.Close()
 
 	// Process API response
-	var closedOrders data.ClosedOrdersResp
+	var closedOrders ClosedOrdersResp
 	err = processAPIResponse(res, &closedOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1290,7 +1286,7 @@ func (kc *KrakenClient) GetClosedOrders(options ...GetClosedOrdersOption) (*data
 // Example usage:
 //
 //	orders, err := kc.GetOrdersInfo("OYR15S-VHRBC-VY5NA2,OYBGFG-LQHXB-RJHY4C", krakenspot.OIWithConsolidateTaker(true))
-func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOption) (*map[string]data.Order, error) {
+func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOption) (*map[string]Order, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1309,7 +1305,7 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 	defer res.Body.Close()
 
 	// Process API response
-	var queriedOrders map[string]data.Order
+	var queriedOrders map[string]Order
 	err = processAPIResponse(res, &queriedOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1357,7 +1353,7 @@ func (kc *KrakenClient) GetOrdersInfo(txID string, options ...GetOrdersInfoOptio
 // # Example Usage:
 //
 //	trades, err := kc.GetTradesHistory(krakenspot.THWithType("closed position"), krakenspot.THWithOffset(2))
-func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*data.TradesHistoryResp, error) {
+func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*TradesHistoryResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1375,7 +1371,7 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 	defer res.Body.Close()
 
 	// Process API response
-	var tradesHistory data.TradesHistoryResp
+	var tradesHistory TradesHistoryResp
 	err = processAPIResponse(res, &tradesHistory)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1402,7 +1398,7 @@ func (kc *KrakenClient) GetTradesHistory(options ...GetTradesHistoryOption) (*da
 // # Example Usage:
 //
 //	trades, err := kc.GetTradeInfo("TRWCIF-3MJWU-5DYJG5,TNGJFU-5CD67-ZV3AEO")
-func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption) (*map[string]data.TradeInfo, error) {
+func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption) (*map[string]TradeInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1421,7 +1417,7 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 	defer res.Body.Close()
 
 	// Process API response
-	var tradeInfo map[string]data.TradeInfo
+	var tradeInfo map[string]TradeInfo
 	err = processAPIResponse(res, &tradeInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1449,7 +1445,7 @@ func (kc *KrakenClient) GetTradeInfo(txID string, options ...GetTradeInfoOption)
 // # Example Usage:
 //
 //	positions, err := kc.GetOpenPositions(krakenspot.OPWithDoCalcs(true))
-func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*map[string]data.OpenPosition, error) {
+func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*map[string]OpenPosition, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1467,7 +1463,7 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 	defer res.Body.Close()
 
 	// Process API response
-	var openPositions map[string]data.OpenPosition
+	var openPositions map[string]OpenPosition
 	err = processAPIResponse(res, &openPositions)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1496,7 +1492,7 @@ func (kc *KrakenClient) GetOpenPositions(options ...GetOpenPositionsOption) (*ma
 // # Example Usage:
 //
 //	positions, err := kc.GetOpenPositionsConsolidated(krakenspot.OPWithDoCalcs(true))
-func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositionsConsolidatedOption) (*[]data.OpenPositionConsolidated, error) {
+func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositionsConsolidatedOption) (*[]OpenPositionConsolidated, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1515,7 +1511,7 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 	defer res.Body.Close()
 
 	// Process API response
-	var openPositions []data.OpenPositionConsolidated
+	var openPositions []OpenPositionConsolidated
 	err = processAPIResponse(res, &openPositions)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1569,7 +1565,7 @@ func (kc *KrakenClient) GetOpenPositionsConsolidated(options ...GetOpenPositions
 // # Example Usage:
 //
 //	ledgers, err := kc.GetLedgersInfo(krakenspot.LIWithAsset("ZUSD,XXBT"), krakenspot.LIWithoutCount(true), krakenspot.LIWithOffset(5))
-func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.LedgersInfoResp, error) {
+func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*LedgersInfoResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1587,7 +1583,7 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 	defer res.Body.Close()
 
 	// Process API response
-	var ledgersInfo data.LedgersInfoResp
+	var ledgersInfo LedgersInfoResp
 	err = processAPIResponse(res, &ledgersInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1614,7 +1610,7 @@ func (kc *KrakenClient) GetLedgersInfo(options ...GetLedgersInfoOption) (*data.L
 // # Example Usage:
 //
 //	ledger, err := kc.GetLedger("LGBRJU-SQZ4L-5HLS3C,L3S26P-BHIOV-TTWYYI", krakenspot.GLWithTrades(true))
-func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (*map[string]data.Ledger, error) {
+func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (*map[string]Ledger, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1633,7 +1629,7 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 	defer res.Body.Close()
 
 	// Process API response
-	var ledgersInfo map[string]data.Ledger
+	var ledgersInfo map[string]Ledger
 	err = processAPIResponse(res, &ledgersInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1661,7 +1657,7 @@ func (kc *KrakenClient) GetLedger(ledgerID string, options ...GetLedgerOption) (
 // # Example Usage:
 //
 //	kc.GetTradeVolume(krakenspot.TVWithPair("XXBTZUSD,XETHZUSD"))
-func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.TradeVolume, error) {
+func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*TradeVolume, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1679,7 +1675,7 @@ func (kc *KrakenClient) GetTradeVolume(options ...GetTradeVolumeOption) (*data.T
 	defer res.Body.Close()
 
 	// Process API response
-	var tradeVolume data.TradeVolume
+	var tradeVolume TradeVolume
 	err = processAPIResponse(res, &tradeVolume)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1746,7 +1742,7 @@ func (kc *KrakenClient) RequestTradesExportReport(description string, options ..
 	defer res.Body.Close()
 
 	// Process API response
-	var exportResp data.RequestExportReportResp
+	var exportResp RequestExportReportResp
 	err = processAPIResponse(res, &exportResp)
 	if err != nil {
 		errStr := err.Error()
@@ -1819,7 +1815,7 @@ func (kc *KrakenClient) RequestLedgersExportReport(description string, options .
 	defer res.Body.Close()
 
 	// Process API response
-	var exportResp data.RequestExportReportResp
+	var exportResp RequestExportReportResp
 	err = processAPIResponse(res, &exportResp)
 	if err != nil {
 		errStr := err.Error()
@@ -1853,7 +1849,7 @@ func (kc *KrakenClient) RequestLedgersExportReport(description string, options .
 // # Example Usage:
 //
 //	reportStatus, err := kc.GetExportReportStatus("ledgers")
-func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.ExportReportStatus, error) {
+func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]ExportReportStatus, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -1877,7 +1873,7 @@ func (kc *KrakenClient) GetExportReportStatus(reportType string) (*[]data.Export
 	defer res.Body.Close()
 
 	// Process API response
-	var exportReports []data.ExportReportStatus
+	var exportReports []ExportReportStatus
 	err = processAPIResponse(res, &exportReports)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -1979,7 +1975,7 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 	defer res.Body.Close()
 
 	// Process API response
-	var deleteResp data.DeleteReportResp
+	var deleteResp DeleteReportResp
 	err = processAPIResponse(res, &deleteResp)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2222,7 +2218,7 @@ func (kc *KrakenClient) DeleteExportReport(reportID string, requestType string) 
 // # Example Usage:
 //
 //	newOrder, err := kc.AddOrder(krakenspot.Limit("45000"), "buy", "1.0", "XXBTZUSD", krakenspot.PostOnly(), krakenspot.CloseLimit("49000"))
-func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair string, options ...AddOrderOption) (*data.AddOrderResp, error) {
+func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair string, options ...AddOrderOption) (*AddOrderResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2243,7 +2239,7 @@ func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair st
 	defer res.Body.Close()
 
 	// Process API response
-	var newOrder data.AddOrderResp
+	var newOrder AddOrderResp
 	err = processAPIResponse(res, &newOrder)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2295,7 +2291,7 @@ func (kc *KrakenClient) AddOrder(orderType OrderType, direction, volume, pair st
 //		log.Println("error sending batch | ", err)
 //	}
 //	log.Println(batchOrderResp)
-func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options ...AddOrderBatchOption) (*data.AddOrderBatchResp, error) {
+func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options ...AddOrderBatchOption) (*AddOrderBatchResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2321,7 +2317,7 @@ func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options 
 	defer res.Body.Close()
 
 	// Process API response
-	var newOrders data.AddOrderBatchResp
+	var newOrders AddOrderBatchResp
 	err = processAPIResponse(res, &newOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2402,7 +2398,7 @@ func (kc *KrakenClient) AddOrderBatch(orders []BatchOrder, pair string, options 
 // # Example Usage:
 //
 //	editOrder, err := kc.EditOrder("OHYO67-6LP66-HMQ437", "XXBTZUSD", krakenspot.NewVolume("2.1234"), krakenspot.NewPostOnly(), krakenspot.NewPrice("45000.1"), krakenspot.ValidateEditOrder())
-func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption) (*data.EditOrderResp, error) {
+func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption) (*EditOrderResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2421,7 +2417,7 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 	defer res.Body.Close()
 
 	// Process API response
-	var editOrder data.EditOrderResp
+	var editOrder EditOrderResp
 	err = processAPIResponse(res, &editOrder)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2443,7 +2439,7 @@ func (kc *KrakenClient) EditOrder(txID, pair string, options ...EditOrderOption)
 // # Example Usage:
 //
 //	cancelResp, err := kc.CancelOrder("1234") // cancels multiple w/ user ref "1234"
-func (kc *KrakenClient) CancelOrder(txID string) (*data.CancelOrderResp, error) {
+func (kc *KrakenClient) CancelOrder(txID string) (*CancelOrderResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2458,7 +2454,7 @@ func (kc *KrakenClient) CancelOrder(txID string) (*data.CancelOrderResp, error) 
 	defer res.Body.Close()
 
 	// Process API response
-	var cancelOrder data.CancelOrderResp
+	var cancelOrder CancelOrderResp
 	err = processAPIResponse(res, &cancelOrder)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2478,7 +2474,7 @@ func (kc *KrakenClient) CancelOrder(txID string) (*data.CancelOrderResp, error) 
 // # Example Usage:
 //
 //	cancelResp, err := kc.CancelAllOrders()
-func (kc *KrakenClient) CancelAllOrders() (*data.CancelOrderResp, error) {
+func (kc *KrakenClient) CancelAllOrders() (*CancelOrderResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2492,7 +2488,7 @@ func (kc *KrakenClient) CancelAllOrders() (*data.CancelOrderResp, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var cancelOrder data.CancelOrderResp
+	var cancelOrder CancelOrderResp
 	err = processAPIResponse(res, &cancelOrder)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2528,7 +2524,7 @@ func (kc *KrakenClient) CancelAllOrders() (*data.CancelOrderResp, error) {
 // # Example Usage:
 //
 //	cancelAfterResp, err := kc.CancelAllOrdersAfter("60")
-func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAfter, error) {
+func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*CancelAllAfter, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2543,7 +2539,7 @@ func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAft
 	defer res.Body.Close()
 
 	// Process API response
-	var cancelAfter data.CancelAllAfter
+	var cancelAfter CancelAllAfter
 	err = processAPIResponse(res, &cancelAfter)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2566,7 +2562,7 @@ func (kc *KrakenClient) CancelAllOrdersAfter(timeout string) (*data.CancelAllAft
 //
 //	ordersToCancel := []string{"OG5V2Y-RYKVL-DT3V3B", "OP5V2Y-RYKVL-ET3V3B"}
 //	cancelOrderResp, err := kc.CancelOrderBatch(ordersToCancel)
-func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*data.CancelOrderResp, error) {
+func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*CancelOrderResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2583,7 +2579,7 @@ func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*data.CancelOrderResp,
 	defer res.Body.Close()
 
 	// Process API response
-	var cancelOrders data.CancelOrderResp
+	var cancelOrders CancelOrderResp
 	err = processAPIResponse(res, &cancelOrders)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2607,7 +2603,7 @@ func (kc *KrakenClient) CancelOrderBatch(txIDs []string) (*data.CancelOrderResp,
 // # Example Usage:
 //
 //	cancelResp, err := kc.CancelAllOrdersForPair("XXBTZUSD")
-func (kc *KrakenClient) CancelAllOrdersForPair(pair string) (*data.CancelOrderResp, error) {
+func (kc *KrakenClient) CancelAllOrdersForPair(pair string) (*CancelOrderResp, error) {
 	orders, err := kc.ListOpenTxIDsForPair(pair)
 	if err != nil {
 		err = fmt.Errorf("error calling ListOpenTxIDsForPair() | %w", err)
@@ -2644,7 +2640,7 @@ func (kc *KrakenClient) CancelAllOrdersForPair(pair string) (*data.CancelOrderRe
 // # Example Usage:
 //
 //	depositMethods, err := kc.GetDepositMethods("XBT")
-func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMethodsOption) (*[]data.DepositMethod, error) {
+func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMethodsOption) (*[]DepositMethod, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2663,7 +2659,7 @@ func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMet
 	defer res.Body.Close()
 
 	// Process API response
-	var depositMethods []data.DepositMethod
+	var depositMethods []DepositMethod
 	err = processAPIResponse(res, &depositMethods)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2692,7 +2688,7 @@ func (kc *KrakenClient) GetDepositMethods(asset string, options ...GetDepositMet
 // # Example Usage:
 //
 //	depositAddresses, err := kc.GetDepositAddresses("XBT", "Bitcoin", krakenspot.DAWithNew())
-func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options ...GetDepositAddressesOption) (*[]data.DepositAddress, error) {
+func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options ...GetDepositAddressesOption) (*[]DepositAddress, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2712,7 +2708,7 @@ func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options
 	defer res.Body.Close()
 
 	// Process API response
-	var depositAddresses []data.DepositAddress
+	var depositAddresses []DepositAddress
 	err = processAPIResponse(res, &depositAddresses)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2757,7 +2753,7 @@ func (kc *KrakenClient) GetDepositAddresses(asset string, method string, options
 // # Example Usage:
 //
 //	deposits, err := kc.GetDepositsStatus()
-func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*[]data.DepositStatus, error) {
+func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*[]DepositStatus, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2775,7 +2771,7 @@ func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*
 	defer res.Body.Close()
 
 	// Process API response
-	var depositsStatus []data.DepositStatus
+	var depositsStatus []DepositStatus
 	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2830,7 +2826,7 @@ func (kc *KrakenClient) GetDepositsStatus(options ...GetDepositsStatusOption) (*
 //		// do something with deposits
 //		cursor = (*depositsResp).NextCursor
 //	}
-func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusPaginatedOption) (*data.DepositStatusPaginated, error) {
+func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusPaginatedOption) (*DepositStatusPaginated, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2849,7 +2845,7 @@ func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusP
 	defer res.Body.Close()
 
 	// Process API response
-	var depositsStatus data.DepositStatusPaginated
+	var depositsStatus DepositStatusPaginated
 	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2881,7 +2877,7 @@ func (kc *KrakenClient) GetDepositsStatusPaginated(options ...GetDepositsStatusP
 //		// do something with deposits
 //		cursor = (*depositsResp).NextCursor
 //	}
-func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositStatusPaginated, error) {
+func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*DepositStatusPaginated, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2897,7 +2893,7 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 	defer res.Body.Close()
 
 	// Process API response
-	var depositsStatus data.DepositStatusPaginated
+	var depositsStatus DepositStatusPaginated
 	err = processAPIResponse(res, &depositsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2933,7 +2929,7 @@ func (kc *KrakenClient) GetDepositsStatusCursor(cursor string) (*data.DepositSta
 // # Example Usage:
 //
 // withdrawalMethods, err := kc.GetWithdrawalMethods(krakenspot.WMWithNetwork("Ethereum"))
-func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOption) (*[]data.WithdrawalMethod, error) {
+func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOption) (*[]WithdrawalMethod, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -2951,7 +2947,7 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalMethods []data.WithdrawalMethod
+	var withdrawalMethods []WithdrawalMethod
 	err = processAPIResponse(res, &withdrawalMethods)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -2992,7 +2988,7 @@ func (kc *KrakenClient) GetWithdrawalMethods(options ...GetWithdrawalMethodsOpti
 // # Example Usage:
 //
 //	withdrawalAddresses, err := kc.GetWithdrawalAddresses(krakenspot.WAWithAsset("XBT"), krakenspot.WAWithVerified(true))
-func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddressesOption) (*[]data.WithdrawalAddress, error) {
+func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddressesOption) (*[]WithdrawalAddress, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3010,7 +3006,7 @@ func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddresses
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalAddresses []data.WithdrawalAddress
+	var withdrawalAddresses []WithdrawalAddress
 	err = processAPIResponse(res, &withdrawalAddresses)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3031,7 +3027,7 @@ func (kc *KrakenClient) GetWithdrawalAddresses(options ...GetWithdrawalAddresses
 // # Example Usage:
 //
 //	withdrawalinfo, err := kc.GetWithdrawalInfo("XBT", "btc_testnet_with1", "0.725")
-func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount string) (*data.WithdrawalInfo, error) {
+func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount string) (*WithdrawalInfo, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3049,7 +3045,7 @@ func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount strin
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalInfo data.WithdrawalInfo
+	var withdrawalInfo WithdrawalInfo
 	err = processAPIResponse(res, &withdrawalInfo)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3101,7 +3097,7 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawFundsResp data.WithdrawFundsResponse
+	var withdrawFundsResp WithdrawFundsResponse
 	err = processAPIResponse(res, &withdrawFundsResp)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3144,7 +3140,7 @@ func (kc *KrakenClient) WithdrawFunds(asset string, key string, amount string, o
 // # Example Usage:
 //
 //	withdrawalStatus, err := kc.GetWithdrawalsStatus(krakenspot.WSWithMethod("Bank Frick (SWIFT)"))
-func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOption) (*[]data.WithdrawalStatus, error) {
+func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOption) (*[]WithdrawalStatus, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3162,7 +3158,7 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalsStatus []data.WithdrawalStatus
+	var withdrawalsStatus []WithdrawalStatus
 	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3218,7 +3214,7 @@ func (kc *KrakenClient) GetWithdrawalsStatus(options ...GetWithdrawalsStatusOpti
 //		// do something withwithdrawals
 //		cursor = (*withdrawalsResp).NextCursor
 //	}
-func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsStatusPaginatedOption) (*data.WithdrawalStatusPaginated, error) {
+func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsStatusPaginatedOption) (*WithdrawalStatusPaginated, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3237,7 +3233,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsS
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalsStatus data.WithdrawalStatusPaginated
+	var withdrawalsStatus WithdrawalStatusPaginated
 	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3270,7 +3266,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusPaginated(options ...GetWithdrawalsS
 //		// do something withwithdrawals
 //		cursor = (*withdrawalsResp).NextCursor
 //	}
-func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.WithdrawalStatusPaginated, error) {
+func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*WithdrawalStatusPaginated, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3286,7 +3282,7 @@ func (kc *KrakenClient) GetWithdrawalsStatusWithCursor(cursor string) (*data.Wit
 	defer res.Body.Close()
 
 	// Process API response
-	var withdrawalsStatus data.WithdrawalStatusPaginated
+	var withdrawalsStatus WithdrawalStatusPaginated
 	err = processAPIResponse(res, &withdrawalsStatus)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3367,7 +3363,7 @@ func (kc *KrakenClient) TransferToFutures(asset string, amount string) (string, 
 	defer res.Body.Close()
 
 	// Process API response
-	var refID data.WalletTransferResponse
+	var refID WalletTransferResponse
 	err = processAPIResponse(res, &refID)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3439,7 +3435,7 @@ func (kc *KrakenClient) CreateSubaccount(username string, email string) error {
 // # Example Usage:
 //
 //	transfer, err := kc.AccountTransfer("XBT", "1.0", "ABCD 1234 EFGH 5678", "IJKL 0987 MNOP 6543")
-func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount string, toAccount string) (*data.AccountTransfer, error) {
+func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount string, toAccount string) (*AccountTransfer, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3458,7 +3454,7 @@ func (kc *KrakenClient) AccountTransfer(asset string, amount string, fromAccount
 	defer res.Body.Close()
 
 	// Process API response
-	var transfer data.AccountTransfer
+	var transfer AccountTransfer
 	err = processAPIResponse(res, &transfer)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3599,7 +3595,7 @@ func (kc *KrakenClient) AllocationStatus(strategyID string) (bool, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var status data.AllocationStatus
+	var status AllocationStatus
 	err = processAPIResponse(res, &status)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3638,7 +3634,7 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var status data.AllocationStatus
+	var status AllocationStatus
 	err = processAPIResponse(res, &status)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3697,7 +3693,7 @@ func (kc *KrakenClient) DeallocationStatus(strategyID string) (bool, error) {
 // # Example Usage:
 //
 //	strategies, err := kc.GetEarnStrategies(krakenspot.ESWithLockType([]string{"flex", "instant"}))
-func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*data.EarnStrategiesResp, error) {
+func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*EarnStrategiesResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3715,7 +3711,7 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 	defer res.Body.Close()
 
 	// Process API response
-	var strategies data.EarnStrategiesResp
+	var strategies EarnStrategiesResp
 	err = processAPIResponse(res, &strategies)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3751,7 +3747,7 @@ func (kc *KrakenClient) GetEarnStrategies(options ...GetEarnStrategiesOption) (*
 // # Example Usage:
 //
 //	allocations, err := kc.GetEarnAllocations(krakenspot.EAWithConvertedAsset("XBT"), krakenspot.EAWithHideZeroAllocations())
-func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) (*data.EarnAllocationsResp, error) {
+func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) (*EarnAllocationsResp, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3769,7 +3765,7 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 	defer res.Body.Close()
 
 	// Process API response
-	var allocations data.EarnAllocationsResp
+	var allocations EarnAllocationsResp
 	err = processAPIResponse(res, &allocations)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3801,7 +3797,7 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 //
 //	tokenResp, err := kc.GetWebSocketsToken()
 //	token := (*tokenResp).Token
-func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
+func (kc *KrakenClient) GetWebSocketsToken() (*WebSocketsToken, error) {
 	// Build payload
 	payload := url.Values{}
 	payload.Add("nonce", strconv.FormatInt(time.Now().UnixNano(), 10))
@@ -3816,7 +3812,7 @@ func (kc *KrakenClient) GetWebSocketsToken() (*data.WebSocketsToken, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var token data.WebSocketsToken
+	var token WebSocketsToken
 	err = processAPIResponse(res, &token)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
@@ -3848,9 +3844,9 @@ func (kc *KrakenClient) AuthenticateWebSockets() error {
 		err = fmt.Errorf("error calling getwebsocketstoken() | %w", err)
 		return err
 	}
-	kc.APIMutex.Lock()
-	kc.WebSocketsToken = tokenResp.Token
-	kc.APIMutex.Unlock()
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.WebSocketToken = tokenResp.Token
+	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
 
@@ -3889,13 +3885,13 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 // counter cap. If it will, waits for counter to decrement before proceeding
 func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 	if kc.HandleRateLimit {
-		kc.APIMutex.Lock()
+		kc.Mutex.Lock()
 		for kc.APICounter+1 >= kc.MaxAPICounter {
 			log.Println("Counter will exceed rate limit. Waiting")
 			kc.CounterDecayCond.Wait()
 		}
 		kc.APICounter += incrementAmount
-		kc.APIMutex.Unlock()
+		kc.Mutex.Unlock()
 	}
 }
 
@@ -3912,7 +3908,7 @@ func processAPIResponse(res *http.Response, target interface{}) error {
 		if err != nil {
 			return err
 		}
-		resp := data.ApiResp{Result: target}
+		resp := ApiResp{Result: target}
 		err = json.Unmarshal(msg, &resp)
 		if err != nil {
 			err = fmt.Errorf("error unmarshalling msg to resp | %w", err)

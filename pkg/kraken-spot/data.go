@@ -1,4 +1,4 @@
-package data
+package krakenspot
 
 import (
 	"encoding/json"
@@ -302,7 +302,7 @@ func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 			trades := make(TradeSlice, len(tradeData))
 			for i, td := range tradeData {
 				tradeInfo, ok := td.([]interface{})
-				if !ok || len(tradeInfo) < 6 {
+				if !ok || len(tradeInfo) != 6 {
 					err = fmt.Errorf("error asserting 'tradeData' to []interface{} or not enough data")
 					return err
 				}
@@ -357,7 +357,7 @@ func (sr *SpreadResp) UnmarshalJSON(data []byte) error {
 			spreads := make(SpreadSlice, len(spreadData))
 			for i, sd := range spreadData {
 				spread, ok := sd.([]interface{})
-				if !ok || len(spread) < 3 {
+				if !ok || len(spread) != 3 {
 					err = fmt.Errorf("error asserting 'sd' to []interface{} or not enough data")
 					return err
 				}
@@ -837,8 +837,63 @@ type WebSocketsToken struct {
 
 // #region Public WebSockets data structs
 
+type GenericMessage struct {
+	Event   string `json:"event"`
+	Content interface{}
+}
+
+func (gm *GenericMessage) UnmarshalJSON(data []byte) error {
+	type Alias GenericMessage
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(gm),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	switch gm.Event {
+	case "subscriptionStatus":
+		var msg WSSubscriptionStatus
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return err
+		}
+		gm.Content = msg
+	default:
+		return fmt.Errorf("unknown event type | %s", gm.Event)
+	}
+	return nil
+}
+
+type GenericArrayMessage struct {
+	ChannelName string
+	Content     interface{}
+}
+
+func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling json | %w", err)
+	}
+	if err := json.Unmarshal(raw[len(raw)-2], &gm.ChannelName); err != nil {
+		return fmt.Errorf("error unmarshalling json | %w", err)
+	}
+	switch gm.ChannelName {
+	case "ticker":
+		var content WSTickerResp
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		gm.Content = content
+	default:
+		return fmt.Errorf("cannot unmarshal unknown channel name | %s", gm.ChannelName)
+	}
+	return nil
+}
+
 type WSConnection struct {
-	ConnectionID int    `json:"connectionID"`
+	ConnectionID uint64 `json:"connectionID"`
 	Event        string `json:"event"`
 	Status       string `json:"status"`
 	Version      string `json:"version"`
@@ -850,6 +905,7 @@ type WSSubscriptionStatus struct {
 	ChannelName  string         `json:"channelName"`
 	Event        string         `json:"event"`
 	RequestID    int            `json:"reqid"`
+	Pair         string         `json:"pair"`
 	Status       string         `json:"status"`
 	Subscription WSSubscription `json:"subscription"`
 }
@@ -864,38 +920,143 @@ type WSSubscription struct {
 
 type WSTickerResp struct {
 	ChannelID   int `json:"channelID"`
-	WSTicker    WSTicker
+	TickerInfo  WSTickerInfo
 	ChannelName string `json:"channelName"`
 	Pair        string `json:"pair"`
 }
 
-type WSTicker struct {
+func (w *WSTickerResp) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 4 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.ChannelID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.TickerInfo); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[2], &w.ChannelName); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[3], &w.Pair); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSTickerInfo struct {
 	Ticker          string
-	Ask             WSTickerBook      `json:"a"`
-	Bid             WSTickerBook      `json:"b"`
-	LastTradeClosed WSTickerLastTrade `json:"c"`
-	Volume          WSTickerDaily     `json:"v"`
-	VWAP            WSTickerDaily     `json:"p"`
-	NumberOfTrades  WSTickerDaily     `json:"t"`
-	Low             WSTickerDaily     `json:"l"`
-	High            WSTickerDaily     `json:"h"`
-	Open            WSTickerDaily     `json:"o"`
+	Ask             WSTickerBook        `json:"a"`
+	Bid             WSTickerBook        `json:"b"`
+	LastTradeClosed WSTickerLastTrade   `json:"c"`
+	Volume          WSTickerDaily       `json:"v"`
+	VWAP            WSTickerDaily       `json:"p"`
+	NumberOfTrades  WSTickerDailyTrades `json:"t"`
+	Low             WSTickerDaily       `json:"l"`
+	High            WSTickerDaily       `json:"h"`
+	Open            WSTickerDaily       `json:"o"`
+}
+
+func (w *WSTickerBook) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 3 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.Price); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.WholeLotVolume); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[2], &w.LotVolume); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type WSTickerBook struct {
-	Price          float64 `json:"price"`
-	WholeLotVolume uint64  `json:"wholeLotVolume"`
-	LotVolume      float64 `json:"lotVolume"`
+	Price          string `json:"price"`
+	WholeLotVolume uint64 `json:"wholeLotVolume"`
+	LotVolume      string `json:"lotVolume"`
+}
+
+func (w *WSTickerLastTrade) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 2 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.Price); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.LotVolume); err != nil {
+		return err
+	}
+	return nil
 }
 
 type WSTickerLastTrade struct {
-	Price     float64 `json:"price"`
-	LotVolume float64 `json:"lotVolume"`
+	Price     string `json:"price"`
+	LotVolume string `json:"lotVolume"`
+}
+
+func (w *WSTickerDaily) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 2 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.Today); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.Last24Hours); err != nil {
+		return err
+	}
+	return nil
 }
 
 type WSTickerDaily struct {
-	Today       float64 `json:"today"`
-	Last24Hours float64 `json:"last24Hours"`
+	Today       string `json:"today"`
+	Last24Hours string `json:"last24Hours"`
+}
+
+func (w *WSTickerDailyTrades) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 2 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.Today); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.Last24Hours); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSTickerDailyTrades struct {
+	Today       uint `json:"today"`
+	Last24Hours uint `json:"last24Hours"`
 }
 
 // #endregion

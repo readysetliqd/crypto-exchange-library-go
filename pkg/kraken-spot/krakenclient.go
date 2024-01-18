@@ -3,16 +3,27 @@ package krakenspot
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/readysetliqd/crypto-exchange-library-go/pkg/kraken-spot/internal/data"
 )
 
-var sharedClient = &http.Client{}
+var sharedClient = &http.Client{
+	Timeout: time.Second * 10, // Set a 10-second timeout for requests
+	// You can also set more granular timeouts using a custom http.Transport
+	Transport: &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second, // Time spent establishing a TCP connection
+			KeepAlive: 5 * time.Second, // Keep-alive period for an active network connection
+		}).DialContext,
+		TLSHandshakeTimeout:   5 * time.Second, // Time spent performing the TLS handshake
+		ResponseHeaderTimeout: 5 * time.Second, // Time spent reading the headers of the response
+		ExpectContinueTimeout: 1 * time.Second, // Time spent waiting for the server to respond to the "100-continue" request
+	},
+}
 
 type KrakenClient struct {
 	APIKey    string
@@ -20,19 +31,42 @@ type KrakenClient struct {
 	Client    *http.Client
 
 	// WebSockets fields
-	WebSocketsToken string
-	WebSocketClient *websocket.Conn
-	WebSocketsMutex sync.RWMutex
-	TickerChannels  map[string]chan data.WSTickerResp
+	*WebSocketManager
 
 	// General API self rate limiting fields
 	HandleRateLimit  bool
 	APICounter       uint8
 	MaxAPICounter    uint8
 	APICounterDecay  uint8
-	APIMutex         sync.Mutex
+	Mutex            sync.Mutex
 	CounterDecayCond *sync.Cond
 }
+
+type WebSocketManager struct {
+	WebSocketToken  string
+	WebSocketClient *websocket.Conn
+	Mutex           sync.RWMutex
+	SubscriptionMgr *SubscriptionManager
+}
+
+type SubscriptionManager struct {
+	PublicSubscriptions  map[string]map[string]*Subscription
+	PrivateSubscriptions map[string]*Subscription
+	Mutex                sync.RWMutex
+}
+
+type Subscription struct {
+	ChannelName    string
+	Pair           string
+	DataChanClosed int32
+	DoneChanClosed int32
+	DataChan       chan interface{}
+	DoneChan       chan struct{}
+	Callback       GenericCallback
+	ConfirmedChan  chan struct{}
+}
+
+type GenericCallback func(data interface{})
 
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier' but
@@ -76,10 +110,15 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		MaxAPICounter:   maxCounter,
 		APICounterDecay: decayRate,
 	}
-	kc.TickerChannels = make(map[string]chan data.WSTickerResp)
+	kc.WebSocketManager = &WebSocketManager{
+		SubscriptionMgr: &SubscriptionManager{
+			PublicSubscriptions:  make(map[string]map[string]*Subscription),
+			PrivateSubscriptions: make(map[string]*Subscription),
+		},
+	}
 	if handleRateLimit {
 		go kc.startRateLimiter()
-		kc.CounterDecayCond = sync.NewCond(&kc.APIMutex)
+		kc.CounterDecayCond = sync.NewCond(&kc.Mutex)
 	}
 	return kc, nil
 }
@@ -90,11 +129,11 @@ func (kc *KrakenClient) startRateLimiter() {
 	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
 	defer ticker.Stop()
 	for range ticker.C {
-		kc.APIMutex.Lock()
+		kc.Mutex.Lock()
 		if kc.APICounter > 0 {
 			kc.APICounter -= 1
 		}
-		kc.APIMutex.Unlock()
+		kc.Mutex.Unlock()
 		kc.CounterDecayCond.Broadcast()
 	}
 }
