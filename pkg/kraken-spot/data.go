@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type ApiResp struct {
@@ -853,6 +854,7 @@ func (gm *GenericMessage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	// TODO add cases here, systemStatus and pong and ???
 	switch gm.Event {
 	case "subscriptionStatus":
 		var msg WSSubscriptionStatus
@@ -879,11 +881,17 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(raw[len(raw)-2], &gm.ChannelName); err != nil {
 		return fmt.Errorf("error unmarshalling json | %w", err)
 	}
-	switch gm.ChannelName {
-	case "ticker":
+	switch {
+	case gm.ChannelName == "ticker":
 		var content WSTickerResp
 		if err := json.Unmarshal(data, &content); err != nil {
-			return fmt.Errorf("error unmarshalling json | %w", err)
+			return fmt.Errorf("error unmarshalling json to wstickerresp type | %w", err)
+		}
+		gm.Content = content
+	case strings.HasPrefix(gm.ChannelName, "ohlc"):
+		var content WSOHLCResp
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json to wsohlcresp type | %w", err)
 		}
 		gm.Content = content
 	default:
@@ -980,7 +988,6 @@ func (w *WSTickerBook) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(rawMessage[2], &w.LotVolume); err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -1057,6 +1064,88 @@ func (w *WSTickerDailyTrades) UnmarshalJSON(data []byte) error {
 type WSTickerDailyTrades struct {
 	Today       uint `json:"today"`
 	Last24Hours uint `json:"last24Hours"`
+}
+
+type WSOHLCResp struct {
+	ChannelID   int `json:"channelID"`
+	OHLC        WSOHLC
+	ChannelName string `json:"channelName"`
+	Pair        string `json:"pair"`
+}
+
+func (w *WSOHLCResp) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 4 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.ChannelID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.OHLC); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[2], &w.ChannelName); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[3], &w.Pair); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSOHLC struct {
+	Time    string
+	EndTime string
+	Open    string
+	High    string
+	Low     string
+	Close   string
+	VWAP    string
+	Volume  string
+	Count   int
+}
+
+func (w *WSOHLC) UnmarshalJSON(data []byte) error {
+	var rawMessage []json.RawMessage
+	if err := json.Unmarshal(data, &rawMessage); err != nil {
+		return err
+	}
+	if len(rawMessage) != 9 {
+		err := fmt.Errorf("unexpected JSON array length")
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[0], &w.Time); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[1], &w.EndTime); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[2], &w.Open); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[3], &w.High); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[4], &w.Low); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[5], &w.Close); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[6], &w.VWAP); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[7], &w.Volume); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(rawMessage[8], &w.Count); err != nil {
+		return err
+	}
+	return nil
 }
 
 // #endregion

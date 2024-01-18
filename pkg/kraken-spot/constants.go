@@ -18,11 +18,23 @@ const (
 var heartbeat = []byte{123, 34, 101, 118, 101, 110, 116, 34, 58, 34, 104, 101, 97, 114, 116, 98, 101, 97, 116, 34, 125}
 
 var publicChannelNames = map[string]bool{
-	"ticker": true,
-	"ohlc":   true,
-	"trade":  true,
-	"spread": true,
-	"book":   true,
+	"ticker":     true,
+	"ohlc-1":     true,
+	"ohlc-5":     true,
+	"ohlc-15":    true,
+	"ohlc-30":    true,
+	"ohlc-60":    true,
+	"ohlc-240":   true,
+	"ohlc-1440":  true,
+	"ohlc-10080": true,
+	"ohlc-21600": true,
+	"trade":      true,
+	"spread":     true,
+	"book-10":    true,
+	"book-25":    true,
+	"book-100":   true,
+	"book-500":   true,
+	"book-1000":  true,
 }
 
 var privateChannelNames = map[string]bool{

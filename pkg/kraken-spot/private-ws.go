@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
 )
 
+// Creates authenticated connection to Kraken WebSocket server.
+//
+// Note: Creates authenticated token which expires within 15 minutes. If
+// private-data channel subscription is desired, recommened subscribing to at
+// least one private-data channel before token expiry (ownTrades or openOrders)
 func (kc *KrakenClient) Connect() error {
 	kc.AuthenticateWebSockets()
 	kc.dialKraken()
@@ -89,16 +95,24 @@ func (ws *WebSocketManager) routeMessage(msg []byte) error {
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
-	switch msg.ChannelName {
+	switch {
 	// TODO add remaining channel types
-	case "ticker":
-		if tickerMsg, ok := msg.Content.(WSTickerResp); !ok {
-			return fmt.Errorf("error asserting msg.content to data.wstickerresp type")
-		} else {
-			// send to channel if open
-			if ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChanClosed == 0 {
-				ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChan <- tickerMsg
-			}
+	case msg.ChannelName == "ticker":
+		tickerMsg, ok := msg.Content.(WSTickerResp)
+		if !ok {
+			return fmt.Errorf("error asserting msg.content to wstickerresp type")
+		}
+		// send to channel if open
+		if ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChan <- tickerMsg
+		}
+	case strings.HasPrefix(msg.ChannelName, "ohlc"):
+		ohlcMsg, ok := msg.Content.(WSOHLCResp)
+		if !ok {
+			return fmt.Errorf("error asserting msg.content to wsohlcresp type")
+		}
+		if ws.SubscriptionMgr.PublicSubscriptions[ohlcMsg.ChannelName][ohlcMsg.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[ohlcMsg.ChannelName][ohlcMsg.Pair].DataChan <- ohlcMsg
 		}
 	default:
 		return fmt.Errorf("cannot route unknown channel name | %s", msg.ChannelName)
@@ -184,6 +198,18 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 }
 
 // Subscribes to "ticker" WebSocket channel for arg 'pair'
+//
+// # Example Usage:
+//
+//	tickerCallback := func(tickerData interface{}) {
+//		if msg, ok := tickerData.(ks.WSTickerResp); ok {
+//			log.Println(msg.TickerInfo.Bid)
+//		}
+//	}
+//	err := kc.SubscribeTicker("XBT/USD", tickerCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
 func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallback) error {
 	channelName := "ticker"
 	if callback == nil {
@@ -233,9 +259,102 @@ func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallbac
 }
 
 // Unsubscribes from "ticker" WebSocket channel for arg 'pair'
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeTicker("XBT/USD")
+//	if err != nil...
 func (kc *KrakenClient) UnsubscribeTicker(pair string) error {
 	channelName := "ticker"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		err = fmt.Errorf("error writing message | %w", err)
+		return err
+	}
+	return nil
+}
+
+// Subscribes to "ohlc" WebSocket channel for arg 'pair' and specified 'interval'
+// in minutes. On subscribing, sends last valid closed candle (had at least one
+// trade), irrespective of time.
+//
+// # Enum:
+//
+// 'interval' - 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+//
+// # Example Usage:
+//
+//	ohlcCallback := func(ohlcData interface{}) {
+//		if msg, ok := ohlcData.(ks.WSOHLCResp); ok {
+//			log.Println(msg.OHLC)
+//		}
+//	}
+//	err = kc.SubscribeOHLC("XBT/USD", 5, ohlcCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback GenericCallback) error {
+	name := "ohlc"
+	channelName := fmt.Sprintf("%s-%v", name, interval)
+	if callback == nil {
+		return fmt.Errorf("callback function must not be nil")
+	}
+	if !publicChannelNames[channelName] {
+		return fmt.Errorf("invalid 'interval' passed; check inputs against enum and try again")
+	}
+	sub := newSub(channelName, pair, callback)
+
+	// check if map is nil and assign Subscription to map
+	ws.SubscriptionMgr.Mutex.Lock()
+	if ws.SubscriptionMgr.PublicSubscriptions[channelName] == nil {
+		ws.SubscriptionMgr.PublicSubscriptions[channelName] = make(map[string]*Subscription)
+	}
+	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
+	ws.SubscriptionMgr.Mutex.Unlock()
+
+	// Build payload and send subscription message
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, name, interval)
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		err = fmt.Errorf("error writing subscription message | %w", err)
+		return err
+	}
+
+	// Start go routine listen for incoming data and call callback functions
+	go func() {
+		<-sub.ConfirmedChan // wait for subscription confirmed
+		for {
+			select {
+			case data := <-sub.DataChan:
+				if sub.DataChanClosed == 0 { // channel is open
+					sub.Callback(data)
+				}
+			case <-sub.DoneChan:
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map
+					ws.SubscriptionMgr.Mutex.Lock()
+					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
+					ws.SubscriptionMgr.Mutex.Unlock()
+					return
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+// Unsubscribes from "ohlc" WebSocket channel for arg 'pair' and specified 'interval'
+// in minutes.
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeOHLC("XBT/USD", 1)
+//	if err != nil...
+func (kc *KrakenClient) UnsubscribeOHLC(pair string, interval uint16) error {
+	channelName := "ohlc"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, channelName, interval)
 	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
