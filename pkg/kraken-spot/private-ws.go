@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
@@ -120,7 +119,6 @@ func (kc *KrakenClient) UnsubscribeOHLC(pair string, interval uint16) error {
 	return nil
 }
 
-// TODO write docstrings with example usage
 // Subscribes to "trade" WebSocket channel for arg 'pair'. Must pass a valid
 // callback function to dictate what to do with incoming data.
 //
@@ -153,6 +151,47 @@ func (ws *WebSocketManager) SubscribeTrades(pair string, callback GenericCallbac
 //	if err != nil...
 func (kc *KrakenClient) UnsubscribeTrades(pair string) error {
 	channelName := "trade"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		err = fmt.Errorf("error writing message | %w", err)
+		return err
+	}
+	return nil
+}
+
+// Subscribes to "spread" WebSocket channel for arg 'pair'. Must pass a valid
+// callback function to dictate what to do with incoming data.
+//
+// # Example Usage:
+//
+//	spreadCallback := func(spreadData interface{}) {
+//		if msg, ok := spreadData.(ks.WSSpreadResp); ok {
+//			log.Println(msg)
+//		}
+//	}
+//	err = kc.SubscribeSpread("XBT/USD", spreadCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeSpread(pair string, callback GenericCallback) error {
+	channelName := "spread"
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	err := ws.subscribePublic(channelName, payload, pair, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribepublic method | %w", err)
+	}
+	return nil
+}
+
+// Unsubscribes from "spread" WebSocket channel for arg 'pair'
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeSpread("XBT/USD")
+//	if err != nil...
+func (kc *KrakenClient) UnsubscribeSpread(pair string) error {
+	channelName := "spread"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
 	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
@@ -286,36 +325,27 @@ func (ws *WebSocketManager) routeMessage(msg []byte) error {
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
-	switch {
-	case msg.ChannelName == "ticker":
-		tickerMsg, ok := msg.Content.(WSTickerResp)
-		if !ok {
-			return fmt.Errorf("error asserting msg.content to wstickerresp type")
-		}
+	switch v := msg.Content.(type) {
+	case WSTickerResp:
 		// send to channel if open
-		if ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChanClosed == 0 {
-			ws.SubscriptionMgr.PublicSubscriptions[tickerMsg.ChannelName][tickerMsg.Pair].DataChan <- tickerMsg
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
-	case strings.HasPrefix(msg.ChannelName, "ohlc"):
-		ohlcMsg, ok := msg.Content.(WSOHLCResp)
-		if !ok {
-			return fmt.Errorf("error asserting msg.content to wsohlcresp type")
-		}
+	case WSOHLCResp:
 		// send to channel if open
-		if ws.SubscriptionMgr.PublicSubscriptions[ohlcMsg.ChannelName][ohlcMsg.Pair].DataChanClosed == 0 {
-			ws.SubscriptionMgr.PublicSubscriptions[ohlcMsg.ChannelName][ohlcMsg.Pair].DataChan <- ohlcMsg
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
-	case msg.ChannelName == "trade":
-		tradeMsg, ok := msg.Content.(WSTradeResp)
-		if !ok {
-			return fmt.Errorf("error asserting msg.content to wstraderesp type")
-		}
+	case WSTradeResp:
 		// send to channel if open
-		if ws.SubscriptionMgr.PublicSubscriptions[tradeMsg.ChannelName][tradeMsg.Pair].DataChanClosed == 0 {
-			ws.SubscriptionMgr.PublicSubscriptions[tradeMsg.ChannelName][tradeMsg.Pair].DataChan <- tradeMsg
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
-	case msg.ChannelName == "spread":
-	case strings.HasPrefix(msg.ChannelName, "book"):
+	case WSSpreadResp:
+		// send to channel if open
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+		}
 	default:
 		return fmt.Errorf("cannot route unknown channel name | %s", msg.ChannelName)
 	}
