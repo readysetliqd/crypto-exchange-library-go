@@ -42,49 +42,11 @@ func (kc *KrakenClient) Connect() error {
 //	}
 func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallback) error {
 	channelName := "ticker"
-	if callback == nil {
-		return fmt.Errorf("callback function must not be nil")
-	}
-
-	sub := newSub(channelName, pair, callback)
-
-	// check if map is nil and assign Subscription to map
-	ws.SubscriptionMgr.Mutex.Lock()
-	if ws.SubscriptionMgr.PublicSubscriptions[channelName] == nil {
-		ws.SubscriptionMgr.PublicSubscriptions[channelName] = make(map[string]*Subscription)
-	}
-	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
-	ws.SubscriptionMgr.Mutex.Unlock()
-
-	// Build payload and send subscription message
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
-		err = fmt.Errorf("error writing subscription message | %w", err)
-		return err
+		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
-
-	// Start go routine listen for incoming data and call callback functions
-	go func() {
-		<-sub.ConfirmedChan // wait for subscription confirmed
-		for {
-			select {
-			case data := <-sub.DataChan:
-				if sub.DataChanClosed == 0 { // channel is open
-					sub.Callback(data)
-				}
-			case <-sub.DoneChan:
-				if sub.DoneChanClosed == 0 { // channel is open
-					sub.closeChannels()
-					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
-					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
-					ws.SubscriptionMgr.Mutex.Unlock()
-					return
-				}
-			}
-		}
-	}()
 	return nil
 }
 
@@ -128,51 +90,11 @@ func (kc *KrakenClient) UnsubscribeTicker(pair string) error {
 func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback GenericCallback) error {
 	name := "ohlc"
 	channelName := fmt.Sprintf("%s-%v", name, interval)
-	if callback == nil {
-		return fmt.Errorf("callback function must not be nil")
-	}
-	if !publicChannelNames[channelName] {
-		return fmt.Errorf("invalid 'interval' passed; check inputs against enum and try again")
-	}
-	sub := newSub(channelName, pair, callback)
-
-	// check if map is nil and assign Subscription to map
-	ws.SubscriptionMgr.Mutex.Lock()
-	if ws.SubscriptionMgr.PublicSubscriptions[channelName] == nil {
-		ws.SubscriptionMgr.PublicSubscriptions[channelName] = make(map[string]*Subscription)
-	}
-	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
-	ws.SubscriptionMgr.Mutex.Unlock()
-
-	// Build payload and send subscription message
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, name, interval)
-	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
-		err = fmt.Errorf("error writing subscription message | %w", err)
-		return err
+		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
-
-	// Start go routine listen for incoming data and call callback functions
-	go func() {
-		<-sub.ConfirmedChan // wait for subscription confirmed
-		for {
-			select {
-			case data := <-sub.DataChan:
-				if sub.DataChanClosed == 0 { // channel is open
-					sub.Callback(data)
-				}
-			case <-sub.DoneChan:
-				if sub.DoneChanClosed == 0 { // channel is open
-					sub.closeChannels()
-					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
-					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
-					ws.SubscriptionMgr.Mutex.Unlock()
-					return
-				}
-			}
-		}
-	}()
 	return nil
 }
 
