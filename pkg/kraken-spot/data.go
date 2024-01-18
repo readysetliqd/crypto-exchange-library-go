@@ -894,6 +894,12 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("error unmarshalling json to wsohlcresp type | %w", err)
 		}
 		gm.Content = content
+	case gm.ChannelName == "trade":
+		var content WSTradeResp
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json to wstraderesp type")
+		}
+		gm.Content = content
 	default:
 		return fmt.Errorf("cannot unmarshal unknown channel name | %s", gm.ChannelName)
 	}
@@ -1143,6 +1149,76 @@ func (w *WSOHLC) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if err := json.Unmarshal(rawMessage[8], &w.Count); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSTradeResp struct {
+	ChannelID   int `json:"channelID"`
+	Trades      []WSTrade
+	ChannelName string `json:"channelName"`
+	Pair        string `json:"pair"`
+}
+
+func (t *WSTradeResp) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	err := json.Unmarshal(data, &raw)
+	if err != nil {
+		return fmt.Errorf("error unmarshalling json | %w", err)
+	}
+	if len(raw) != 4 {
+		return fmt.Errorf("encountered unexpected data length during unmarshal")
+	}
+	if err := json.Unmarshal(raw[0], &t.ChannelID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &t.Trades); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[2], &t.ChannelName); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[3], &t.Pair); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSTrade struct {
+	Price     string
+	Volume    string
+	Time      string
+	Direction string
+	OrderType string
+	Misc      string
+}
+
+func (t *WSTrade) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	err := json.Unmarshal(data, &raw)
+	if err != nil {
+		return fmt.Errorf("error umarshalling to raw")
+	}
+	if len(raw) != 6 {
+		return fmt.Errorf("unexpected data length")
+	}
+	if err := json.Unmarshal(raw[0], &t.Price); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &t.Volume); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[2], &t.Time); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[3], &t.Direction); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[4], &t.OrderType); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[5], &t.Misc); err != nil {
 		return err
 	}
 	return nil
