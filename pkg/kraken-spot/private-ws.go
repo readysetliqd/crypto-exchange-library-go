@@ -18,6 +18,8 @@ func (kc *KrakenClient) Connect() error {
 	return nil
 }
 
+// Starts a goroutine that continuously reads messages from the WebSocket
+// connection. If the message is not a heartbeat message, it routes the message.
 func (ws *WebSocketManager) startMessageReader() {
 	go func() {
 		for {
@@ -36,6 +38,8 @@ func (ws *WebSocketManager) startMessageReader() {
 	}()
 }
 
+// Does preliminary unmarshalling incoming message and determines which specific
+// route<messageType>Message method to call.
 func (ws *WebSocketManager) routeMessage(msg []byte) error {
 	var err error
 	if msg[0] == '[' { // public or private websocket message
@@ -82,6 +86,8 @@ func (ws *WebSocketManager) routeMessage(msg []byte) error {
 	return nil
 }
 
+// Asserts message to correct unique data type and routes to the appropriate
+// channel if channel is still open.
 func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 	switch msg.ChannelName {
 	// TODO add remaining channel types
@@ -100,14 +106,20 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 	return nil
 }
 
+// Asserts message to correct unique data type and routes to the appropriate
+// channel if channel is still open.
 func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error {
 	return nil
 }
 
+// Asserts message to correct unique data type and routes to the appropriate
+// channel if channel is still open.
 func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 	return nil
 }
 
+// Asserts message to correct unique data type and routes to the appropriate
+// channel if channel is still open.
 func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	switch msg.Event {
 	case "subscriptionStatus":
@@ -117,19 +129,18 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			switch subscriptionStatusMsg.Status {
 			case "subscribed":
 				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].ConfirmSubscription()
+					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].confirmSubscription()
 				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].ConfirmSubscription()
+					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].confirmSubscription()
 				}
 			case "unsubscribed":
-				//TODO
 				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
-
+					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].unsubscribe()
 				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].Unsubscribe()
+					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].unsubscribe()
 				}
 			case "error":
-				//TODO
+				return fmt.Errorf("subscribe/unsubscribe error msg received. operation not completed; check inputs and try again | %s", subscriptionStatusMsg.ErrorMessage)
 			default:
 				return fmt.Errorf("cannot route unknown subscriptionStatus status | %s", subscriptionStatusMsg.Status)
 			}
@@ -140,23 +151,25 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	return nil
 }
 
-func (s *Subscription) Unsubscribe() {
+// Completes unsubscribing by sending a message to s.DoneChan.
+func (s *Subscription) unsubscribe() {
 	s.DoneChan <- struct{}{}
 }
 
-// ConfirmSubscription closes the ConfirmedChan to signal that the subscription is confirmed.
-func (s *Subscription) ConfirmSubscription() {
+// Closes the s.ConfirmedChan to signal that the subscription is confirmed.
+func (s *Subscription) confirmSubscription() {
 	close(s.ConfirmedChan)
 }
 
-// CloseChannels safely closes the DataChan and DoneChan.
-func (s *Subscription) CloseChannels() {
-	atomic.StoreInt32(&s.DataChanClosed, 1) // Set the flag before closing
+// Safely closes the DataChan and DoneChan with atomic flags set before closing.
+func (s *Subscription) closeChannels() {
+	atomic.StoreInt32(&s.DataChanClosed, 1)
 	close(s.DataChan)
-	atomic.StoreInt32(&s.DoneChanClosed, 1) // Set the flag before closing
+	atomic.StoreInt32(&s.DoneChanClosed, 1)
 	close(s.DoneChan)
 }
 
+// Helper function to build default new *Subscription data type
 func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 	return &Subscription{
 		ChannelName:    channelName,
@@ -170,7 +183,7 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 	}
 }
 
-// Subscribes to "ticker" channel for arg 'pair'
+// Subscribes to "ticker" WebSocket channel for arg 'pair'
 func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallback) error {
 	channelName := "ticker"
 	if callback == nil {
@@ -201,12 +214,16 @@ func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallbac
 		for {
 			select {
 			case data := <-sub.DataChan:
-				if sub.DataChanClosed == 0 {
+				if sub.DataChanClosed == 0 { // channel is open
 					sub.Callback(data)
 				}
 			case <-sub.DoneChan:
-				if sub.DoneChanClosed == 0 {
-					sub.CloseChannels()
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map
+					ws.SubscriptionMgr.Mutex.Lock()
+					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
+					ws.SubscriptionMgr.Mutex.Unlock()
 					return
 				}
 			}
@@ -215,6 +232,7 @@ func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallbac
 	return nil
 }
 
+// Unsubscribes from "ticker" WebSocket channel for arg 'pair'
 func (kc *KrakenClient) UnsubscribeTicker(pair string) error {
 	channelName := "ticker"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
