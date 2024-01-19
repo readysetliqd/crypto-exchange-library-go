@@ -897,13 +897,19 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 	case gm.ChannelName == "trade":
 		var content WSTradeResp
 		if err := json.Unmarshal(data, &content); err != nil {
-			return fmt.Errorf("error unmarshalling json to wstraderesp type")
+			return fmt.Errorf("error unmarshalling json to wstraderesp type | %w", err)
 		}
 		gm.Content = content
 	case gm.ChannelName == "spread":
 		var content WSSpreadResp
 		if err := json.Unmarshal(data, &content); err != nil {
-			return fmt.Errorf("error unmarshalling json to wsspreadresp type")
+			return fmt.Errorf("error unmarshalling json to wsspreadresp type | %w", err)
+		}
+		gm.Content = content
+	case strings.HasPrefix(gm.ChannelName, "book"):
+		var content WSOrderBook
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json to wsbookresp type | %w", err)
 		}
 		gm.Content = content
 	default:
@@ -1290,6 +1296,111 @@ func (s *WSSpread) UnmarshalJSON(data []byte) error {
 	}
 	if err := json.Unmarshal(raw[4], &s.AskVolume); err != nil {
 		return fmt.Errorf("error unmarshalling json | %w", err)
+	}
+	return nil
+}
+
+type WSBookResp struct {
+	ChannelID   int `json:"channelID"`
+	OrderBook   WSOrderBook
+	ChannelName string `json:"channelName"`
+	Pair        string `json:"pair"`
+}
+
+func (s *WSBookResp) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling to raw | %w", err)
+	}
+	if len(raw) != 4 {
+		return fmt.Errorf("unexpected data length encountered")
+	}
+	if err := json.Unmarshal(raw[0], &s.ChannelID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &s.OrderBook); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[2], &s.ChannelName); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[3], &s.Pair); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSOrderBook struct {
+	Asks     []WSBookEntry
+	Bids     []WSBookEntry
+	Checksum string
+}
+
+func (ob *WSOrderBook) UnmarshalJSON(data []byte) error {
+	type Alias WSOrderBook
+	aux := &struct {
+		AsksA  []WSBookEntry `json:"a"`
+		AsksAS []WSBookEntry `json:"as"`
+		BidsB  []WSBookEntry `json:"b"`
+		BidsBS []WSBookEntry `json:"bs"`
+		*Alias
+	}{
+		Alias: (*Alias)(ob),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.AsksA != nil {
+		ob.Asks = aux.AsksA
+	} else if aux.AsksAS != nil {
+		ob.Asks = aux.AsksAS
+	}
+	if aux.BidsB != nil {
+		ob.Bids = aux.BidsB
+	} else if aux.BidsBS != nil {
+		ob.Bids = aux.BidsBS
+	}
+	return nil
+}
+
+type WSBookEntry struct {
+	Price      string
+	Volume     string
+	Time       string
+	UpdateType string
+}
+
+func (s *WSBookEntry) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling to raw | %w", err)
+	}
+	switch len(raw) {
+	case 3:
+		if err := json.Unmarshal(raw[0], &s.Price); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		if err := json.Unmarshal(raw[1], &s.Volume); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		if err := json.Unmarshal(raw[2], &s.Time); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+	case 4:
+		if err := json.Unmarshal(raw[0], &s.Price); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		if err := json.Unmarshal(raw[1], &s.Volume); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		if err := json.Unmarshal(raw[2], &s.Time); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+		if err := json.Unmarshal(raw[3], &s.UpdateType); err != nil {
+			return fmt.Errorf("error unmarshalling json | %w", err)
+		}
+	default:
+		return fmt.Errorf("unexpected data length encountered")
 	}
 	return nil
 }

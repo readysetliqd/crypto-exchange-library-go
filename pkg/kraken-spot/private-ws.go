@@ -201,6 +201,30 @@ func (kc *KrakenClient) UnsubscribeSpread(pair string) error {
 	return nil
 }
 
+// TODO test
+// TODO write docstrings with example usage
+func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback GenericCallback) error {
+	name := "book"
+	channelName := fmt.Sprintf("%s-%v", name, depth)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, name, depth)
+	err := ws.subscribePublic(channelName, payload, pair, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribepublic method | %w", err)
+	}
+	return nil
+}
+
+func (kc *KrakenClient) UnsubscribeBook(pair string, depth uint16) error {
+	channelName := "book"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, channelName, depth)
+	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		err = fmt.Errorf("error writing message | %w", err)
+		return err
+	}
+	return nil
+}
+
 // #endregion
 
 // #region *WebSocketManager helper methods (subscribe, readers, routers, and connections)
@@ -211,6 +235,9 @@ func (kc *KrakenClient) UnsubscribeSpread(pair string) error {
 func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, callback GenericCallback) error {
 	if callback == nil {
 		return fmt.Errorf("callback function must not be nil")
+	}
+	if !publicChannelNames[channelName] {
+		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
 	}
 
 	sub := newSub(channelName, pair, callback)
@@ -342,6 +369,11 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
 	case WSSpreadResp:
+		// send to channel if open
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+		}
+	case WSBookResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
