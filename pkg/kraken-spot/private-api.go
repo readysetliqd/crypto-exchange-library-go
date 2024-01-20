@@ -3885,13 +3885,16 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 // counter cap. If it will, waits for counter to decrement before proceeding
 func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 	if kc.HandleRateLimit {
-		kc.Mutex.Lock()
-		for kc.APICounter+1 >= kc.MaxAPICounter {
+		kc.APIManager.Mutex.Lock()
+		for kc.APICounter+incrementAmount >= kc.MaxAPICounter {
 			log.Println("Counter will exceed rate limit. Waiting")
 			kc.CounterDecayCond.Wait()
 		}
+		if kc.APICounter == 0 {
+			go kc.startRateLimiter()
+		}
 		kc.APICounter += incrementAmount
-		kc.Mutex.Unlock()
+		kc.APIManager.Mutex.Unlock()
 	}
 }
 

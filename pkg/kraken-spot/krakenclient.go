@@ -30,10 +30,12 @@ type KrakenClient struct {
 	APISecret []byte
 	Client    *http.Client
 
-	// WebSockets fields
+	*APIManager
 	*WebSocketManager
+}
 
-	// General API self rate limiting fields
+// REST API
+type APIManager struct {
 	HandleRateLimit  bool
 	APICounter       uint8
 	MaxAPICounter    uint8
@@ -42,6 +44,7 @@ type KrakenClient struct {
 	CounterDecayCond *sync.Cond
 }
 
+// WebSocket API
 type WebSocketManager struct {
 	WebSocketToken  string
 	WebSocketClient *websocket.Conn
@@ -64,12 +67,12 @@ type SubscriptionManager struct {
 type Subscription struct {
 	ChannelName    string
 	Pair           string
-	DataChanClosed int32
-	DoneChanClosed int32
+	ConfirmedChan  chan struct{}
 	DataChan       chan interface{}
 	DoneChan       chan struct{}
+	DataChanClosed int32
+	DoneChanClosed int32
 	Callback       GenericCallback
-	ConfirmedChan  chan struct{}
 }
 
 type GenericCallback func(data interface{})
@@ -109,9 +112,11 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 	}
 	maxCounter := maxCounterMap[verificationTier]
 	kc := &KrakenClient{
-		APIKey:          apiKey,
-		APISecret:       decodedSecret,
-		Client:          sharedClient,
+		APIKey:    apiKey,
+		APISecret: decodedSecret,
+		Client:    sharedClient,
+	}
+	kc.APIManager = &APIManager{
 		HandleRateLimit: handleRateLimit,
 		MaxAPICounter:   maxCounter,
 		APICounterDecay: decayRate,
@@ -127,7 +132,7 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 	}
 	if handleRateLimit {
 		go kc.startRateLimiter()
-		kc.CounterDecayCond = sync.NewCond(&kc.Mutex)
+		kc.APIManager.CounterDecayCond = sync.NewCond(&kc.APIManager.Mutex)
 	}
 	return kc, nil
 }
@@ -138,11 +143,14 @@ func (kc *KrakenClient) startRateLimiter() {
 	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
 	defer ticker.Stop()
 	for range ticker.C {
-		kc.Mutex.Lock()
+		kc.APIManager.Mutex.Lock()
 		if kc.APICounter > 0 {
 			kc.APICounter -= 1
+			if kc.APICounter == 0 {
+				ticker.Stop()
+			}
 		}
-		kc.Mutex.Unlock()
+		kc.APIManager.Mutex.Unlock()
 		kc.CounterDecayCond.Broadcast()
 	}
 }
