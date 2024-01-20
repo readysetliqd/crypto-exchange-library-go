@@ -857,12 +857,23 @@ func (gm *GenericMessage) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// TODO add cases here, systemStatus and pong and ???
 	switch gm.Event {
 	case "subscriptionStatus":
 		var msg WSSubscriptionStatus
 		if err := json.Unmarshal(data, &msg); err != nil {
-			return err
+			return fmt.Errorf("error unmarshalling subscriptionstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "systemStatus":
+		var msg WSSystemStatus
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling systemstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "pong":
+		var msg WSPong
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling pong msg | %w", err)
 		}
 		gm.Content = msg
 	default:
@@ -921,7 +932,12 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type WSConnection struct {
+type WSPong struct {
+	Event string `json:"event"`
+	ReqID int    `json:"reqid"`
+}
+
+type WSSystemStatus struct {
 	ConnectionID uint64 `json:"connectionID"`
 	Event        string `json:"event"`
 	Status       string `json:"status"`
@@ -1415,11 +1431,11 @@ func (s *WSBookEntry) UnmarshalJSON(data []byte) error {
 type InternalOrderBook struct {
 	Asks           []InternalBookEntry
 	Bids           []InternalBookEntry
-	Mutex          sync.RWMutex
 	DataChan       chan WSOrderBook
 	DoneChan       chan struct{}
 	DataChanClosed int32
 	DoneChanClosed int32
+	Mutex          sync.RWMutex
 }
 
 type InternalBookEntry struct {

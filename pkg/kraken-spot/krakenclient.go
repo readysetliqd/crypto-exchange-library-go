@@ -40,17 +40,18 @@ type APIManager struct {
 	APICounter       uint8
 	MaxAPICounter    uint8
 	APICounterDecay  uint8
-	Mutex            sync.Mutex
 	CounterDecayCond *sync.Cond
+	Mutex            sync.Mutex
 }
 
 // WebSocket API
 type WebSocketManager struct {
-	WebSocketToken  string
-	WebSocketClient *websocket.Conn
-	Mutex           sync.RWMutex
-	SubscriptionMgr *SubscriptionManager
-	OrderBookMgr    *OrderBookManager
+	WebSocketToken       string
+	WebSocketClient      *websocket.Conn
+	SubscriptionMgr      *SubscriptionManager
+	OrderBookMgr         *OrderBookManager
+	SystemStatusCallback func(status string)
+	Mutex                sync.RWMutex
 }
 
 type OrderBookManager struct {
@@ -137,7 +138,7 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 	return kc, nil
 }
 
-// A go func method with a timer that decays kc.APICounter every second by the
+// A go routine method with a timer that decays kc.APICounter every second by the
 // amount in kc.APICounterDecay. Stops at 0.
 func (kc *KrakenClient) startRateLimiter() {
 	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))

@@ -18,17 +18,173 @@ import (
 
 // #region Exported *KrakenClient and *WebSocketManager methods (Connect Subscribe<> and Unsubscribe<>)
 
-// Creates authenticated connection to Kraken WebSocket server.
+// Creates authenticated connection to Kraken WebSocket server. Accepts arg
+// 'systemStatusCallback' callback function which an end user can implement
+// their own logic on handling incoming system status change messages.
 //
 // Note: Creates authenticated token which expires within 15 minutes. If
 // private-data channel subscription is desired, recommened subscribing to at
 // least one private-data channel before token expiry (ownTrades or openOrders)
-func (kc *KrakenClient) Connect() error {
-	kc.AuthenticateWebSockets()
-	kc.dialKraken()
+//
+// # Enum (possible incoming status message values):
+//
+// 'status': "online", "maintenance", "cancel_only", "limit_only", "post_only"
+//
+// # Example Usage:
+//
+// Example 1: Using systemStatusCallback for graceful exits
+//
+// Prints state of book every 15 seconds until systemStatus message other than
+// "online" is received, then calls UnsubscribeAll() method and shuts down program.
+//
+//	// Note: error handling omitted throughout
+//	// initialize KrakenClient and variables
+//	kc, err := ks.NewKrakenClient(os.Getenv("KRAKEN_API_KEY"), os.Getenv("KRAKEN_API_SECRET"), 2, true)
+//	depth := uint16(10)
+//	pair := "XBT/USD"
+//	// exit program gracefully if system status isnt "online"
+//	systemStatusCallback := func(status string) {
+//		if status != "online" {
+//			kc.UnsubscribeAll()
+//			os.Exit(0)
+//		}
+//	}
+//	// connect and subscribe
+//	err = kc.Connect(systemStatusCallback)
+//	err = kc.SubscribeBook(pair, depth, nil)
+//	// print asks and bids every 15 seconds
+//	ticker := time.NewTicker(time.Second * 15)
+//	for range ticker.C {
+//		asks, err := kc.ListAsks(pair, depth)
+//		bids, err := kc.ListBids(pair, depth)
+//		log.Println(asks)
+//		log.Println(bids)
+//	}
+//
+// Example 2: Using systemStatusCallback for graceful startup
+//
+// Starts hypothetical goroutine function named placeBidAskSpread() when system
+// is online and stops it when any other systemStatus is received.
+//
+//	// Note: error handling omitted throughout
+//	// initialize KrakenClient and variables
+//	kc, err := ks.NewKrakenClient(os.Getenv("KRAKEN_API_KEY"), os.Getenv("KRAKEN_API_SECRET"), 2, true)
+//	depth := uint16(10)
+//	pair := "XBT/USD"
+//	// define your placeBidAskSpread function places a bid and ask every 15 seconds
+//	placeBidAskSpread := func(ctx context.Context) {
+//		for {
+//			select {
+//			case <-ctx.Done():
+//				return
+//			default:
+//				// logic to place an order each on best bid and best ask
+//				time.Sleep(time.Second * 15)
+//			}
+//		}
+//	}
+//	// create a context with cancel
+//	ctx, cancel := context.WithCancel(context.Background())
+//	// handle system status changes
+//	systemStatusCallback := func(status string) {
+//		if status == "online" {
+//			// if system status is online, start the goroutine and subscribe to the book
+//			go placeBidAskSpread(ctx)
+//			err = kc.SubscribeBook(pair, depth, nil)
+//		} else {
+//			// if system status is not online, cancel the context to stop the goroutine and unsubscribe from the book
+//			cancel()
+//			err = kc.UnsubscribeBook(pair, depth)
+//			// create a new context for the next time the system status is online
+//			ctx, cancel = context.WithCancel(context.Background())
+//		}
+//	}
+//	// connect
+//	err = kc.Connect(systemStatusCallback)
+//	// block program from exiting
+//	select{}
+func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error {
+	if systemStatusCallback == nil {
+		log.Println(`
+		WARNING: Passing nil to arg 'systemStatusCallback' may 
+		result in program crashes or invalid messages being pushed to Kraken's 
+		server on the occasions where their system's status is changed. Ensure 
+		you have implemented handling system status changes on your own or 
+		reinitialize the client with a valid systemStatusCallback function
+		`)
+	}
+	err := kc.AuthenticateWebSockets()
+	if err != nil {
+		return fmt.Errorf("error authenticating websockets | %w", err)
+	}
+	err = kc.dialKraken()
+	if err != nil {
+		return fmt.Errorf("error dialing kraken | %w", err)
+	}
 	kc.startMessageReader()
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
+
+// // TODO finish implementation
+// // TODO test
+// // TODO write docstrings
+// func (ws *WebSocketManager) UnsubscribeAll() error {
+// 	ws.SubscriptionMgr.Mutex.Lock()
+// 	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
+// 		switch channelName {
+// 		case "ownTrades":
+// 			err := ws.UnsubscribeOwnTrades(ws.WebSocketToken)
+// 			if err != nil {
+// 				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
+// 			}
+// 		case "openOrders":
+// 			err := ws.UnsubscribeOpenOrders(ws.WebSocketToken)
+// 			if err != nil {
+// 				return fmt.Errorf("error unsubscribing from openorders | %w", err)
+// 			}
+// 		default:
+// 			return fmt.Errorf("unknown channel name %s", channelName)
+// 		}
+// 	}
+// 	for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
+// 		switch {
+// 		case channelName == "ticker":
+// 			for pair := range pairMap {
+// 				ws.UnsubscribeTicker(pair)
+// 			}
+// 		case channelName == "trade":
+// 			for pair := range pairMap {
+// 				ws.UnsubscribeTrade(pair)
+// 			}
+// 		case channelName == "spread":
+// 			for pair := range pairMap {
+// 				ws.UnsubscribeSpread(pair)
+// 			}
+// 		case strings.HasPrefix(channelName, "ohlc"):
+// 			_, intervalStr, _ := strings.Cut(channelName, "-")
+// 			interval, err := strconv.ParseUint(intervalStr, 10, 16)
+// 			if err != nil {
+// 				return fmt.Errorf("error parsing uint from interval | %w", err)
+// 			}
+// 			for pair := range pairMap {
+// 				ws.UnsubscribeOHLC(pair, uint16(interval))
+// 			}
+// 		case strings.HasPrefix(channelName, "book"):
+// 			_, depthStr, _ := strings.Cut(channelName, "-")
+// 			depth, err := strconv.ParseUint(depthStr, 10, 16)
+// 			if err != nil {
+// 				return fmt.Errorf("error parsing uint from depth | %w", err)
+// 			}
+// 			for pair := range pairMap {
+// 				ws.UnsubscribeBook(pair, uint16(depth))
+// 			}
+// 		}
+// 	}
+// 	return nil
+// }
 
 // Subscribes to "ticker" WebSocket channel for arg 'pair'. Must pass a valid
 // callback function to dictate what to do with incoming data.
@@ -60,10 +216,10 @@ func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallbac
 //
 //	err := kc.UnsubscribeTicker("XBT/USD")
 //	if err != nil...
-func (kc *KrakenClient) UnsubscribeTicker(pair string) error {
+func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
 	channelName := "ticker"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -113,10 +269,10 @@ func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback
 //
 //	err := kc.UnsubscribeOHLC("XBT/USD", 1)
 //	if err != nil...
-func (kc *KrakenClient) UnsubscribeOHLC(pair string, interval uint16) error {
+func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error {
 	channelName := "ohlc"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, channelName, interval)
-	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -134,11 +290,11 @@ func (kc *KrakenClient) UnsubscribeOHLC(pair string, interval uint16) error {
 //			log.Println(msg.Trades)
 //		}
 //	}
-//	err = kc.SubscribeTrades("XBT/USD", tradeCallback)
+//	err = kc.SubscribeTrade("XBT/USD", tradeCallback)
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeTrades(pair string, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeTrade(pair string, callback GenericCallback) error {
 	channelName := "trade"
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
 	err := ws.subscribePublic(channelName, payload, pair, callback)
@@ -152,12 +308,12 @@ func (ws *WebSocketManager) SubscribeTrades(pair string, callback GenericCallbac
 //
 // # Example Usage:
 //
-//	err := kc.UnsubscribeTrades("XBT/USD")
+//	err := kc.UnsubscribeTrade("XBT/USD")
 //	if err != nil...
-func (kc *KrakenClient) UnsubscribeTrades(pair string) error {
+func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
 	channelName := "trade"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -195,10 +351,10 @@ func (ws *WebSocketManager) SubscribeSpread(pair string, callback GenericCallbac
 //
 //	err := kc.UnsubscribeSpread("XBT/USD")
 //	if err != nil...
-func (kc *KrakenClient) UnsubscribeSpread(pair string) error {
+func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 	channelName := "spread"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -561,7 +717,7 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	switch msg.Event {
 	case "subscriptionStatus":
 		if subscriptionStatusMsg, ok := msg.Content.(WSSubscriptionStatus); !ok {
-			return fmt.Errorf("error asserting msg.content to data.wssubscriptionstatus type")
+			return fmt.Errorf("error asserting msg.content to wssubscriptionstatus type")
 		} else {
 			switch subscriptionStatusMsg.Status {
 			case "subscribed":
@@ -585,7 +741,22 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 				return fmt.Errorf("cannot route unknown subscriptionStatus status | %s", subscriptionStatusMsg.Status)
 			}
 		}
-	// TODO add other event types, pong, systemStatus, ???
+	case "systemStatus":
+		if systemStatusMsg, ok := msg.Content.(WSSystemStatus); !ok {
+			return fmt.Errorf("error asserting msg.content to wssystemstatus type")
+		} else {
+			if ws.SystemStatusCallback != nil {
+				ws.SystemStatusCallback(systemStatusMsg.Status)
+			} else {
+				log.Printf("system status: %s", systemStatusMsg.Status)
+			}
+		}
+	case "pong":
+		if pongMsg, ok := msg.Content.(WSPong); !ok {
+			return fmt.Errorf("error asserting msg.content to wspong type")
+		} else {
+			log.Println(pongMsg.Event, pongMsg.ReqID)
+		}
 	default:
 		return fmt.Errorf("cannot route unknown event type | %s", msg.Event)
 	}
@@ -640,16 +811,16 @@ func (ws *WebSocketManager) dialKraken() error {
 		return err
 	}
 	ws.WebSocketClient = conn
-	var initResponse WSConnection
-	err = ws.WebSocketClient.ReadJSON(&initResponse)
-	if err != nil {
-		err = fmt.Errorf("error reading json | %w", err)
-		return err
-	}
-	if !(initResponse.Event == "systemStatus" && initResponse.Status == "online") {
-		err = fmt.Errorf("error establishing websockets connection. system status | %s", initResponse.Status)
-		return err
-	}
+	// var initResponse WSSystemStatus
+	// err = ws.WebSocketClient.ReadJSON(&initResponse)
+	// if err != nil {
+	// 	err = fmt.Errorf("error reading json | %w", err)
+	// 	return err
+	// }
+	// if !(initResponse.Event == "systemStatus" && initResponse.Status == "online") {
+	// 	err = fmt.Errorf("error establishing websockets connection. system status | %s", initResponse.Status)
+	// 	return err
+	// }
 	return nil
 }
 
