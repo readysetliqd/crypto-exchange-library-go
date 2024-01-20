@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/shopspring/decimal"
 )
 
 type ApiResp struct {
@@ -907,7 +910,7 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 		}
 		gm.Content = content
 	case strings.HasPrefix(gm.ChannelName, "book"):
-		var content WSOrderBook
+		var content WSBookResp
 		if err := json.Unmarshal(data, &content); err != nil {
 			return fmt.Errorf("error unmarshalling json to wsbookresp type | %w", err)
 		}
@@ -1333,7 +1336,7 @@ func (s *WSBookResp) UnmarshalJSON(data []byte) error {
 type WSOrderBook struct {
 	Asks     []WSBookEntry
 	Bids     []WSBookEntry
-	Checksum string
+	Checksum string `json:"c"`
 }
 
 func (ob *WSOrderBook) UnmarshalJSON(data []byte) error {
@@ -1403,6 +1406,31 @@ func (s *WSBookEntry) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unexpected data length encountered")
 	}
 	return nil
+}
+
+// #endregion
+
+// #region InternalOrderBook data structs
+
+type InternalOrderBook struct {
+	Asks           []InternalBookEntry
+	Bids           []InternalBookEntry
+	Mutex          sync.RWMutex
+	DataChan       chan WSOrderBook
+	DoneChan       chan struct{}
+	DataChanClosed int32
+	DoneChanClosed int32
+}
+
+type InternalBookEntry struct {
+	Price  decimal.Decimal
+	Volume decimal.Decimal
+	Time   decimal.Decimal
+}
+
+type BookState struct {
+	Asks *[]InternalBookEntry
+	Bids *[]InternalBookEntry
 }
 
 // #endregion

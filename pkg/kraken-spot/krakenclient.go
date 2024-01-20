@@ -47,6 +47,12 @@ type WebSocketManager struct {
 	WebSocketClient *websocket.Conn
 	Mutex           sync.RWMutex
 	SubscriptionMgr *SubscriptionManager
+	OrderBookMgr    *OrderBookManager
+}
+
+type OrderBookManager struct {
+	OrderBooks map[string]map[string]*InternalOrderBook
+	Mutex      sync.RWMutex
 }
 
 type SubscriptionManager struct {
@@ -114,6 +120,9 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		SubscriptionMgr: &SubscriptionManager{
 			PublicSubscriptions:  make(map[string]map[string]*Subscription),
 			PrivateSubscriptions: make(map[string]*Subscription),
+		},
+		OrderBookMgr: &OrderBookManager{
+			OrderBooks: make(map[string]map[string]*InternalOrderBook),
 		},
 	}
 	if handleRateLimit {

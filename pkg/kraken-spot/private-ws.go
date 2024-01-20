@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/crc32"
 	"log"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 // #region Exported *KrakenClient and *WebSocketManager methods (Connect Subscribe<> and Unsubscribe<>)
@@ -201,12 +206,96 @@ func (kc *KrakenClient) UnsubscribeSpread(pair string) error {
 	return nil
 }
 
-// TODO test
-// TODO write docstrings with example usage
+// Subscribes to "book" WebSocket channel for arg 'pair' and specified 'depth'
+// which is number of levels shown for each bids and asks side. On subscribing,
+// the first message received will be the full initial state of the order book.
+//
+// Accepts function arg 'callback' in which the end user can decide what to do
+// with incoming data. If nil is passed to 'callback', the WebSocketManager
+// will internally manage and maintain the current state of orderbook for the
+// subscription within the KrakenClient instance.
+//
+// When nil is passed, access state of the orderbook with the following methods:
+//
+//	func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, error)
+//
+//	func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookEntry, error)
+//
+//	func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error)
+//
+// # Enum:
+//
+// 'depth' - 10, 25, 100, 500, 1000
+//
+// # Example Usage:
+//
+// Method 1: Package will maintain book state internally by passing nil 'callback'
+//
+//	// subscribe to book
+//	depth := uint16(10)
+//	pair := "XBT/USD"
+//	err = kc.SubscribeBook(pair, depth, nil)
+//	if err != nil {
+//		log.Println(err)
+//	}
+//	// Print list of asks to terminal every 15 seconds
+//	ticker := time.NewTicker(time.Second * 15)
+//	for range ticker.C {
+//		asks, err := kc.ListAsks(pair, depth)
+//		if err != nil {
+//			log.Println(err)
+//		} else {
+//			log.Println(asks)
+//		}
+//	}
+//
+// Method 2: End user builds and maintains current book state with their own
+// custom 'callback' function and helper functions
+//
+//	type Book struct {
+//		Asks []Level
+//		Bids []Level
+//	}
+//	var book Book
+//	func initialStateMsg(msg krakenspot.WSOrderBook) bool {
+//		//...your implementation here
+//	}
+//	func initializeBook(msg krakenspot.WSOrderBook, book *Book) {
+//		//...your implementation here
+//	}
+//	func updateBook(msg krakenspot.WSOrderBook, book *Book) {
+//		//...your implementation here
+//	}
+//	// call functions for building and updating book as messages are received
+//	func bookCallback(bookData interface{}) {
+//		if resp, ok := bookData.(krakenspot.WSBookResp); ok {
+//			msg := resp.OrderBook
+//			if initialStateMsg(msg) { // implement
+//				initializeBook(msg, &book)
+//			} else {
+//				updateBook(msg, book)
+//			}
+//		}
+//	}
+//	// subscribe to book
+//	depth := uint16(10)
+//	pair := "XBT/USD"
+//	err := kc.SubscribeBook(pair, depth, bookCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+//	// Prints book to terminal every 15 seconds
+//	ticker := time.NewTicker(time.Second * 15)
+//	for range ticker.C {
+//		log.Println(book)
+//	}
 func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback GenericCallback) error {
 	name := "book"
 	channelName := fmt.Sprintf("%s-%v", name, depth)
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, name, depth)
+	if callback == nil {
+		callback = ws.bookCallback(channelName, pair, depth)
+	}
 	err := ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
@@ -214,15 +303,83 @@ func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback Ge
 	return nil
 }
 
-func (kc *KrakenClient) UnsubscribeBook(pair string, depth uint16) error {
+// Unsubscribes from "book" WebSocket channel for arg 'pair' and specified 'depth'
+// as number of book entries for each bids and asks.
+//
+// # Enum:
+//
+// 'depth' - 10, 25, 100, 500, 1000
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeBook("XBT/USD", 10)
+//	if err != nil...
+func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16) error {
 	channelName := "book"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, channelName, depth)
-	err := kc.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
 	}
 	return nil
+}
+
+// Returns a BookState struct which holds pointers to both Bids and Asks slices
+// for current state of book for arg 'pair' and specified 'depth'.
+//
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// SubscribeBook() method was called with a nil 'callback' function). This method
+// will throw an error if the end user is building and maintaining the order
+// book with their own custom callback function passed to 'callback'.
+//
+// CAUTION: As this method returns pointers to the Asks and Bids fields, any
+// modification done directly to Asks or Bids will likely result in an error and
+// cause the WebSocketManager to unsubscribe from this channel. If modification
+// to these slices is desired, either make a copy from reference use ListAsks()
+// and ListBids() instead.
+func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return BookState{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	ob := BookState{
+		Asks: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks,
+		Bids: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids,
+	}
+	return ob, nil
+}
+
+// Returns a copy of the Asks slice which holds the current state of the order
+// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
+// for larger lists ('depth').
+//
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// SubscribeBook() method was called with a nil 'callback' function). This method
+// will throw an error if the end user is building and maintaining the order
+// book with their own custom callback function passed to 'callback'.
+func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookEntry, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks...), nil
+}
+
+// Returns a copy of the Bids slice which holds the current state of the order
+// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
+// for larger lists ('depth').
+//
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// SubscribeBook() method was called with a nil 'callback' function). This method
+// will throw an error if the end user is building and maintaining the order
+// book with their own custom callback function passed to 'callback'.
+func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
 }
 
 // #endregion
@@ -387,12 +544,14 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error {
+	//TODO implement this
 	return nil
 }
 
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
+	//TODO implement this
 	return nil
 }
 
@@ -414,6 +573,9 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			case "unsubscribed":
 				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
 					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].unsubscribe()
+					if strings.HasPrefix(subscriptionStatusMsg.ChannelName, "book") {
+						ws.OrderBookMgr.OrderBooks[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].unsubscribe()
+					}
 				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
 					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].unsubscribe()
 				}
@@ -525,6 +687,316 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 		DataChanClosed: 0,
 		DoneChanClosed: 0,
 	}
+}
+
+// #endregion
+
+// #region *InternalOrderBook helper methods (bookCallback, unsubscribe, close, buildInitial, checksum, update)
+
+func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16) func(data interface{}) {
+	return func(data interface{}) {
+		if msg, ok := data.(WSBookResp); ok {
+			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; !ok {
+				ws.OrderBookMgr.Mutex.Lock()
+				ws.OrderBookMgr.OrderBooks[channelName] = make(map[string]*InternalOrderBook)
+				ws.OrderBookMgr.Mutex.Unlock()
+			}
+			if _, ok := ws.OrderBookMgr.OrderBooks[channelName][pair]; !ok {
+				ws.OrderBookMgr.Mutex.Lock()
+				ws.OrderBookMgr.OrderBooks[channelName][pair] = &InternalOrderBook{
+					DataChan:       make(chan WSOrderBook),
+					DoneChan:       make(chan struct{}),
+					DataChanClosed: 0,
+					DoneChanClosed: 0,
+				}
+				ws.OrderBookMgr.Mutex.Unlock()
+				if err := ws.OrderBookMgr.OrderBooks[channelName][pair].buildInitialBook(&msg.OrderBook); err != nil {
+					log.Printf("error building initial state of book; sending unsubscribe msg; try subscribing again | %s", err)
+					err := ws.UnsubscribeBook(pair, depth)
+					if err != nil {
+						log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+					}
+					return
+				}
+				go func() {
+					ob := ws.OrderBookMgr.OrderBooks[channelName][pair]
+					for {
+						select {
+						case bookUpdate := <-ob.DataChan:
+							if ob.DataChanClosed == 0 {
+								ob.Mutex.Lock()
+								if len(bookUpdate.Asks) > 0 {
+									for _, ask := range bookUpdate.Asks {
+										newEntry, err := stringEntryToDecimal(&ask)
+										if err != nil {
+											log.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s", err)
+											err := ws.UnsubscribeBook(pair, depth)
+											if err != nil {
+												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+											}
+										}
+										switch {
+										case ask.UpdateType == "r":
+											err = ob.replenishEntry(newEntry, &ob.Asks)
+										case newEntry.Volume.Equal(decimal.Zero):
+											err = ob.deleteAskEntry(newEntry, &ob.Asks)
+										default:
+											err = ob.updateAskEntry(newEntry, &ob.Asks)
+										}
+										if err != nil {
+											log.Printf("error calling replenish method; stopping goroutine and unsubscribing | %s", err)
+											err := ws.UnsubscribeBook(pair, depth)
+											if err != nil {
+												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+											}
+										}
+									}
+								}
+								if len(bookUpdate.Bids) > 0 {
+									for _, bid := range bookUpdate.Bids {
+										newEntry, err := stringEntryToDecimal(&bid)
+										if err != nil {
+											log.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s", err)
+											err := ws.UnsubscribeBook(pair, depth)
+											if err != nil {
+												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+											}
+										}
+										switch {
+										case bid.UpdateType == "r":
+											err = ob.replenishEntry(newEntry, &ob.Bids)
+										case newEntry.Volume.Equal(decimal.Zero):
+											err = ob.deleteBidEntry(newEntry, &ob.Bids)
+										default:
+											err = ob.updateBidEntry(newEntry, &ob.Bids)
+										}
+										if err != nil {
+											log.Printf("error calling replenish/update/delete method; stopping goroutine and unsubscribing | %s", err)
+											err := ws.UnsubscribeBook(pair, depth)
+											if err != nil {
+												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+											}
+										}
+									}
+								}
+								ob.Mutex.Unlock()
+								// Stop go routine and unsubscribe if checksum does not pass
+								checksum, err := strconv.ParseUint(bookUpdate.Checksum, 10, 32)
+								if err != nil {
+									log.Printf("error parsing checksum uint32; stopping goroutine and unsubscribing | %s", err)
+									err := ws.UnsubscribeBook(pair, depth)
+									if err != nil {
+										log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+									}
+									return
+								}
+								if err := ob.validateChecksum(uint32(checksum)); err != nil {
+									log.Printf("error validating checksum; stopping goroutine and unsubscribing | %s", err)
+									err := ws.UnsubscribeBook(pair, depth)
+									if err != nil {
+										log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+									}
+									return
+								}
+							}
+						case <-ob.DoneChan:
+							if ob.DoneChanClosed == 0 {
+								ob.closeChannels()
+								// Delete subscription from book
+								ws.OrderBookMgr.Mutex.Lock()
+								if ws.OrderBookMgr.OrderBooks != nil {
+									if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; ok {
+										delete(ws.OrderBookMgr.OrderBooks[channelName], pair)
+									} else {
+										log.Printf("UnsubscribeBook error | channel name %s does not exist in OrderBooks", channelName)
+									}
+								} else {
+									log.Println("UnsubscribeBook error | OrderBooks is nil")
+								}
+								ws.OrderBookMgr.Mutex.Unlock()
+							}
+							return
+						}
+					}
+				}()
+			} else {
+				ws.OrderBookMgr.OrderBooks[channelName][pair].DataChan <- msg.OrderBook
+			}
+		}
+	}
+}
+
+// Appends incoming replenishEntry to end of slice. Should only be used with
+// "replenish" orders identified by 'UpdateType' field == "r".
+func (ob *InternalOrderBook) replenishEntry(replenishEntry *InternalBookEntry, internalEntries *[]InternalBookEntry) error {
+	*internalEntries = append(*internalEntries, *replenishEntry)
+	return nil
+}
+
+// Performs binary search on slice pre-sorted ascending by Price field to find
+// existing entry with same price level as incoming deleteEntry and deletes it.
+// Should only be used with incoming deleteEntry with 'Volume' field == 0.
+func (ob *InternalOrderBook) deleteAskEntry(deleteEntry *InternalBookEntry, internalEntries *[]InternalBookEntry) error {
+	i := sort.Search(len(*internalEntries), func(i int) bool {
+		return (*internalEntries)[i].Price.Cmp(deleteEntry.Price) >= 0
+	})
+
+	if i < len(*internalEntries) && (*internalEntries)[i].Price.Equal(deleteEntry.Price) {
+		*internalEntries = append((*internalEntries)[:i], (*internalEntries)[i+1:]...)
+	} else {
+		return fmt.Errorf("deleteaskentry error | entry not found | \ndeleteEntry: %v\nCurrent Asks: %v", deleteEntry, *internalEntries)
+	}
+	return nil
+}
+
+// Performs binary search on slice pre-sorted descending by Price field to find
+// existing entry with same price level as incoming deleteEntry and deletes it.
+// Should only be used with incoming deleteEntry with 'Volume' field == 0.
+func (ob *InternalOrderBook) deleteBidEntry(deleteEntry *InternalBookEntry, internalEntries *[]InternalBookEntry) error {
+	i := sort.Search(len(*internalEntries), func(i int) bool {
+		return (*internalEntries)[i].Price.Cmp(deleteEntry.Price) <= 0
+	})
+
+	if i < len(*internalEntries) && (*internalEntries)[i].Price.Equal(deleteEntry.Price) {
+		*internalEntries = append((*internalEntries)[:i], (*internalEntries)[i+1:]...)
+	} else {
+		return fmt.Errorf("deletebidentry error | entry not found | \ndeleteEntry: %v\nCurrent Bids: %v", deleteEntry, *internalEntries)
+	}
+	return nil
+}
+
+// Performs binary search on slice pre-sorted ascending by Price field to find
+// existing entry with same price level as incoming updateEntry. Updates volume
+// if entry exists or inserts and cuts slice back down to size if it doesn't exist
+func (ob *InternalOrderBook) updateAskEntry(updateEntry *InternalBookEntry, internalEntries *[]InternalBookEntry) error {
+	// binary search to find index closest to updateEntry price
+	i := sort.Search(len(*internalEntries), func(i int) bool {
+		return (*internalEntries)[i].Price.Cmp(updateEntry.Price) >= 0
+	})
+	// if entry exists, update volume
+	if i < len(*internalEntries) && (*internalEntries)[i].Price.Equal(updateEntry.Price) {
+		(*internalEntries)[i].Volume = updateEntry.Volume
+	} else {
+		*internalEntries = append(*internalEntries, InternalBookEntry{})
+		copy((*internalEntries)[i+1:], (*internalEntries)[i:])
+		(*internalEntries)[i] = *updateEntry
+		*internalEntries = (*internalEntries)[:len(*internalEntries)-1]
+	}
+	return nil
+}
+
+// Performs binary search on slice pre-sorted descending by Price field to find
+// existing entry with same price level as incoming updateEntry. Updates volume
+// if entry exists or inserts and cuts slice back down to size if it doesn't exist
+func (ob *InternalOrderBook) updateBidEntry(updateEntry *InternalBookEntry, internalEntries *[]InternalBookEntry) error {
+	// binary search to find index closest to updateEntry price
+	i := sort.Search(len(*internalEntries), func(i int) bool {
+		return (*internalEntries)[i].Price.Cmp(updateEntry.Price) <= 0
+	})
+	// if entry exists, update volume
+	if i < len(*internalEntries) && (*internalEntries)[i].Price.Equal(updateEntry.Price) {
+		(*internalEntries)[i].Volume = updateEntry.Volume
+	} else {
+		*internalEntries = append(*internalEntries, InternalBookEntry{})
+		copy((*internalEntries)[i+1:], (*internalEntries)[i:])
+		(*internalEntries)[i] = *updateEntry
+		*internalEntries = (*internalEntries)[:len(*internalEntries)-1]
+	}
+	return nil
+}
+
+// Builds checksum string from top 10 asks and bids per the Kraken docs and
+// validates it against incoming checksum message 'msgChecksum'. Returns an error
+// if they do not match.
+func (ob *InternalOrderBook) validateChecksum(msgChecksum uint32) error {
+	var buffer bytes.Buffer
+	buffer.Grow(260)
+	ob.Mutex.RLock()
+	// write to buffer from asks
+	for i := 0; i < 10; i++ {
+		price := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Price.StringFixed(5), ".", ""), "0")
+		buffer.WriteString(price)
+		volume := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Volume.StringFixed(8), ".", ""), "0")
+		buffer.WriteString(volume)
+	}
+
+	// write to buffer from bids
+	for i := 0; i < 10; i++ {
+		price := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Price.StringFixed(5), ".", ""), "0")
+		buffer.WriteString(price)
+		volume := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Volume.StringFixed(8), ".", ""), "0")
+		buffer.WriteString(volume)
+	}
+	ob.Mutex.RUnlock()
+	if checksum := crc32.ChecksumIEEE(buffer.Bytes()); checksum != msgChecksum {
+		return fmt.Errorf("invalid checksum")
+	}
+	return nil
+}
+
+// Completes unsubscribing by sending a message to ob.DoneChan.
+func (ob *InternalOrderBook) unsubscribe() {
+	ob.DoneChan <- struct{}{}
+}
+
+// Safely closes the DataChan and DoneChan with atomic flags set before closing.
+func (ob *InternalOrderBook) closeChannels() {
+	atomic.StoreInt32(&ob.DataChanClosed, 1)
+	close(ob.DataChan)
+	atomic.StoreInt32(&ob.DoneChanClosed, 1)
+	close(ob.DoneChan)
+}
+
+// Builds initial state of book from first message (arg 'msg') after subscribing
+// to new book channel.
+func (ob *InternalOrderBook) buildInitialBook(msg *WSOrderBook) error {
+	ob.Mutex.Lock()
+	defer ob.Mutex.Unlock()
+	capacity := len(msg.Bids)
+	ob.Bids = make([]InternalBookEntry, capacity)
+	ob.Asks = make([]InternalBookEntry, capacity)
+	for i, bid := range msg.Bids {
+		newBid, err := stringEntryToDecimal(&bid)
+		if err != nil {
+			return fmt.Errorf("error calling stringentrytodecimal | %w", err)
+		}
+		ob.Bids[i] = *newBid
+	}
+	for i, ask := range msg.Asks {
+		newAsk, err := stringEntryToDecimal(&ask)
+		if err != nil {
+			return fmt.Errorf("error calling stringentrytodecimal | %w", err)
+		}
+		ob.Asks[i] = *newAsk
+	}
+	return nil
+}
+
+// #endregion
+
+// #region Helper functions
+
+// Converts Price Volume and Time string fields from WSBookEntry to decimal.decimal
+// type, initializes InternalBookEntry type with the decimal.decimal values and
+// returns it.
+func stringEntryToDecimal(entry *WSBookEntry) (*InternalBookEntry, error) {
+	decimalPrice, err := decimal.NewFromString(entry.Price)
+	if err != nil {
+		return nil, err
+	}
+	decimalVolume, err := decimal.NewFromString(entry.Volume)
+	if err != nil {
+		return nil, err
+	}
+	decimalTime, err := decimal.NewFromString(entry.Time)
+	if err != nil {
+		return nil, err
+	}
+	return &InternalBookEntry{
+		Price:  decimalPrice,
+		Volume: decimalVolume,
+		Time:   decimalTime,
+	}, nil
 }
 
 // #endregion
