@@ -18,6 +18,7 @@ import (
 
 // #region Exported *KrakenClient and *WebSocketManager methods (Connect Subscribe<> and Unsubscribe<>)
 
+// TODO update docstrings after connect public and private only methods are written
 // Creates both authenticated and public connections to Kraken WebSocket server.
 // Use ConnectPublic() instead if private channels aren't needed. Accepts arg
 // 'systemStatusCallback' callback function which an end user can implement
@@ -138,6 +139,7 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 }
 
 // TODO write a connect public only method
+// TODO write a connect private only method
 
 // TODO write a SetLogger method and add Logger to WebSocketManager struct
 
@@ -551,9 +553,16 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
 }
 
-// TODO implement functional options for consolidate_taker and snapshot
 // Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
-// callback function to dictate what to do with incoming data.
+// callback function to dictate what to do with incoming data. Accepts none or
+// many functional options args 'options'.
+//
+// # Functional Options:
+//
+//	// Whether to consolidate order fills by root taker trade(s). If false, all order fills will show separately. Defaults to true if not called.
+//	func WithoutConsolidatedTaker()
+//	// Whether to send historical feed data snapshot upon subscription. Defaults to true if not called.
+//	func WithoutSnapshot()
 //
 // # Example Usage:
 //
@@ -562,13 +571,17 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 //			log.Println(msg)
 //		}
 //	}
-//	err = kc.SubscribeOwnTrades(ownTradesCallback)
+//	err = kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options ...SubscribeOwnTradesOption) error {
+	var buffer bytes.Buffer
+	for _, option := range options {
+		option(&buffer)
+	}
 	channelName := "ownTrades"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}}`, channelName, ws.WebSocketToken, buffer.String())
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
@@ -592,16 +605,33 @@ func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
 	return nil
 }
 
-// TODO test
-// TODO write docstrings with example usage
-// TODO implement functional options for consolidate_taker and snapshot
 // Subscribes to "openOrders" authenticated WebSocket channel. Must pass a valid
-// callback function to dictate what to do with incoming data.
+// callback function to dictate what to do with incoming data. Accepts none or
+// one functional options arg passed to 'options'.
+//
+// # Functional Options:
+//
+//	// Whether to send rate-limit counter in updates  Defaults to false if not called.
+//	func WithRateCounter()
 //
 // # Example Usage:
-func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback) error {
+//
+//	openOrdersCallback := func(openOrdersData interface{}) {
+//		if msg, ok := openOrdersData.(ks.WSOpenOrdersResp); ok {
+//			log.Println(msg)
+//		}
+//	}
+//	err = kc.SubscribeOpenOrders(openOrdersCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, options ...SubscribeOpenOrdersOption) error {
+	var buffer bytes.Buffer
+	for _, option := range options {
+		option(&buffer)
+	}
 	channelName := "openOrders"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}}`, channelName, ws.WebSocketToken, buffer.String())
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
@@ -742,9 +772,8 @@ func (ws *WebSocketManager) startMessageReader() {
 				// TODO figure out reconnect logic, reconnect here? route error to somewhere else?
 				// TODO this error occurs if connect, subscribe, unsubscribe, subscribe, unsubscribe
 				// TODO from AUTHENTICATED. but somehow the private reader threw this error?
-				if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
-					log.Println("re-initializing websocket client")
-				}
+				// if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
+				// }
 				continue
 			}
 			if !bytes.Equal(heartbeat, msg) { // not a heartbeat message

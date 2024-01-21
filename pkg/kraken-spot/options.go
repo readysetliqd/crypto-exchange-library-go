@@ -1,6 +1,7 @@
 package krakenspot
 
 import (
+	"bytes"
 	"fmt"
 	"net/url"
 )
@@ -1515,6 +1516,37 @@ func EAWithConvertedAsset(asset string) GetEarnAllocationsOption {
 func EAWithHideZeroAllocations() GetEarnAllocationsOption {
 	return func(payload url.Values) {
 		payload.Add("hide_zero_allocations", "true")
+	}
+}
+
+// #endregion
+
+// #region Private WebSocket endpoint functional options
+
+type SubscribeOwnTradesOption func(buffer *bytes.Buffer)
+
+// Whether to consolidate order fills by root taker trade(s). If false, all
+// order fills will show separately. Defaults to true if not called.
+func WithoutConsolidatedTaker() SubscribeOwnTradesOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "consolidate_taker": false`)
+	}
+}
+
+// Whether to send historical feed data snapshot upon subscription. Defaults to
+// true if not called.
+func WithoutSnapshot() SubscribeOwnTradesOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "snapshot": false`)
+	}
+}
+
+type SubscribeOpenOrdersOption func(buffer *bytes.Buffer)
+
+// Whether to send rate-limit counter in updates  Defaults to false if not called.
+func WithRateCounter() SubscribeOpenOrdersOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "ratecounter": true`)
 	}
 }
 
