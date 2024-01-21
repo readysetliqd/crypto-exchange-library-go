@@ -830,16 +830,7 @@ type EarnAlloReward struct {
 
 // #endregion
 
-// #region Private WebSockets Authentication Data structs
-
-type WebSocketsToken struct {
-	Token   string `json:"token"`
-	Expires uint16 `json:"expires"`
-}
-
-// #endregion
-
-// #region Public WebSockets data structs
+// #region Generic WebSocket Data structs
 
 type GenericMessage struct {
 	Event   string `json:"event"`
@@ -926,6 +917,18 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("error unmarshalling json to wsbookresp type | %w", err)
 		}
 		gm.Content = content
+	case gm.ChannelName == "ownTrades":
+		var content WSOwnTradesResp
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json to wsowntradesresp type | %w", err)
+		}
+		gm.Content = content
+	case gm.ChannelName == "openOrders":
+		var content WSOpenOrdersResp
+		if err := json.Unmarshal(data, &content); err != nil {
+			return fmt.Errorf("error unmarshalling json to wsopenordersresp type | %w", err)
+		}
+		gm.Content = content
 	default:
 		return fmt.Errorf("cannot unmarshal unknown channel name | %s", gm.ChannelName)
 	}
@@ -962,6 +965,10 @@ type WSSubscription struct {
 	Name         string `json:"name"`
 	Token        string `json:"token"`
 }
+
+// #endregion
+
+// #region Public WebSockets data structs
 
 type WSTickerResp struct {
 	ChannelID   int `json:"channelID"`
@@ -1422,6 +1429,130 @@ func (s *WSBookEntry) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unexpected data length encountered")
 	}
 	return nil
+}
+
+// #endregion
+
+// #region Private WebSockets Authentication Data structs
+
+type WebSocketsToken struct {
+	Token   string `json:"token"`
+	Expires uint16 `json:"expires"`
+}
+
+type WSOwnTradesResp struct {
+	OwnTrades   []map[string]WSOwnTrade
+	ChannelName string
+	Sequence    int
+}
+
+type WSSequence struct {
+	Sequence int `json:"sequence"`
+}
+
+func (ot *WSOwnTradesResp) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling data to []raw | %w", err)
+	}
+	if len(raw) != 3 {
+		return fmt.Errorf("encountered unexpected data length")
+	}
+	if err := json.Unmarshal(raw[0], &ot.OwnTrades); err != nil {
+		return fmt.Errorf("error unmarshalling owntrades | %w", err)
+	}
+	if err := json.Unmarshal(raw[1], &ot.ChannelName); err != nil {
+		return fmt.Errorf("error unmarshalling channelname | %w", err)
+	}
+	var seq WSSequence
+	if err := json.Unmarshal(raw[2], &seq); err != nil {
+		return fmt.Errorf("error unmarshalling sequence")
+	}
+	ot.Sequence = seq.Sequence
+	return nil
+}
+
+type WSOwnTrade struct {
+	OrderTxID     string `json:"ordertxid"`
+	PositionTxID  string `json:"postxid"`
+	Pair          string `json:"pair"`
+	Time          string `json:"time"`
+	Direction     string `json:"type"`
+	OrderType     string `json:"ordertype"`
+	AvgPrice      string `json:"price"`
+	QuoteCost     string `json:"cost"`
+	QuoteFee      string `json:"fee"`
+	Volume        string `json:"vol"`
+	InitialMargin string `json:"margin"`
+	UserRef       int    `json:"userref"`
+}
+
+type WSOpenOrdersResp struct {
+	OpenOrders  []map[string]WSOpenOrder
+	ChannelName string
+	Sequence    int
+}
+
+func (oo *WSOpenOrdersResp) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling data to raw")
+	}
+	if err := json.Unmarshal(raw[0], &oo.OpenOrders); err != nil {
+		return fmt.Errorf("error unmarshalling raw to openorders")
+	}
+	if err := json.Unmarshal(raw[1], &oo.ChannelName); err != nil {
+		return fmt.Errorf("error unmarshalling raw to openorders")
+	}
+	var seq WSSequence
+	if err := json.Unmarshal(raw[2], &seq); err != nil {
+		return fmt.Errorf("error unmarshalling raw to openorders")
+	}
+	oo.Sequence = seq.Sequence
+	return nil
+}
+
+type WSOpenOrder struct {
+	RefID               string             `json:"refid"`
+	UserRef             int                `json:"userref"`
+	Status              string             `json:"status"`
+	OpenTime            string             `json:"opentm"`
+	StartTime           string             `json:"starttm"`
+	DisplayVolume       string             `json:"display_volume"`
+	DisplayVolumeRemain string             `json:"display_volume_remain"`
+	ExpireTime          string             `json:"expiretm"`
+	ContingentOrder     WSContingent       `json:"contingent"`
+	Description         WSOrderDescription `json:"descr"`
+	LastUpdateTime      string             `json:"lastupdated"`
+	VolumeExecuted      string             `json:"vol_exec"`
+	QuoteCost           string             `json:"cost"`
+	QuoteFee            string             `json:"fee"`
+	AvgPrice            string             `json:"avg_price"`
+	StopPrice           string             `json:"stopprice"`
+	LimitPrice          string             `json:"limitprice"`
+	Misc                string             `json:"misc"`
+	OrderFlags          string             `json:"oflags"`
+	TimeInForce         string             `json:"timeinforce"`
+	CancelReason        string             `json:"cancel_reason"`
+	RateCount           int                `json:"ratecount"`
+}
+
+type WSContingent struct {
+	OrderType  string `json:"ordertype"`
+	Price      string `json:"price"`
+	Price2     string `json:"price2"`
+	OrderFlags string `json:"oflags"`
+}
+
+type WSOrderDescription struct {
+	Pair             string `json:"pair"`
+	Direction        string `json:"type"`
+	OrderType        string `json:"ordertype"`
+	Price            string `json:"price"`  // Limit price for limit orders. Trigger price for stop-loss, stop-loss-limit, take-profit, take-profit-limit, trailing-stop, and trailing-stop-limit orders
+	Price2           string `json:"price2"` // Secondary limit price for stop-loss-limit, take-profit-limit, and trailing-stop-limit orders
+	Leverage         string `json:"leverage"`
+	Description      string `json:"order"`
+	CloseDescription string `json:"close"`
 }
 
 // #endregion

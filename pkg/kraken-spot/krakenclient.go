@@ -46,8 +46,9 @@ type APIManager struct {
 
 // WebSocket API
 type WebSocketManager struct {
-	WebSocketToken       string
 	WebSocketClient      *websocket.Conn
+	AuthWebSocketClient  *websocket.Conn
+	WebSocketToken       string
 	SubscriptionMgr      *SubscriptionManager
 	OrderBookMgr         *OrderBookManager
 	SystemStatusCallback func(status string)

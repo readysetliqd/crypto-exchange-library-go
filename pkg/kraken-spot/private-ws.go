@@ -18,13 +18,14 @@ import (
 
 // #region Exported *KrakenClient and *WebSocketManager methods (Connect Subscribe<> and Unsubscribe<>)
 
-// Creates authenticated connection to Kraken WebSocket server. Accepts arg
+// Creates both authenticated and public connections to Kraken WebSocket server.
+// Use ConnectPublic() instead if private channels aren't needed. Accepts arg
 // 'systemStatusCallback' callback function which an end user can implement
 // their own logic on handling incoming system status change messages.
 //
-// Note: Creates authenticated token which expires within 15 minutes. If
-// private-data channel subscription is desired, recommened subscribing to at
-// least one private-data channel before token expiry (ownTrades or openOrders)
+// Note: Creates authenticated token with AuthenticateWebSockets() method which
+// expires within 15 minutes. Strongly recommended to subscribe to at least one
+// private WebSocket channel and leave it open.
 //
 // # Enum (possible incoming status message values):
 //
@@ -115,18 +116,30 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 	}
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
+		// TODO implement retry, 403 error when system is under maintenance,
+		// GetSystemStatus also returns 403 when under maintenance. does it return
+		// 403 for prohibited vpn locations? no internet err contains "no such host"
 		return fmt.Errorf("error authenticating websockets | %w", err)
 	}
-	err = kc.dialKraken()
+	err = kc.dialKraken(wsPrivateURL)
 	if err != nil {
-		return fmt.Errorf("error dialing kraken | %w", err)
+		return fmt.Errorf("error dialing kraken private url | %w", err)
+	}
+	err = kc.dialKraken(wsPublicURL)
+	if err != nil {
+		return fmt.Errorf("error dialing kraken public url | %w", err)
 	}
 	kc.startMessageReader()
+	kc.startAuthMessageReader()
 	kc.WebSocketManager.Mutex.Lock()
 	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
 	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
+
+// TODO write a connect public only method
+
+// TODO write a SetLogger method and add Logger to WebSocketManager struct
 
 // // TODO finish implementation
 // // TODO test
@@ -538,6 +551,80 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
 }
 
+// TODO implement functional options for consolidate_taker and snapshot
+// Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
+// callback function to dictate what to do with incoming data.
+//
+// # Example Usage:
+//
+//	ownTradesCallback := func(ownTradesData interface{}) {
+//		if msg, ok := ownTradesData.(ks.WSOwnTradesResp); ok {
+//			log.Println(msg)
+//		}
+//	}
+//	err = kc.SubscribeOwnTrades(ownTradesCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback) error {
+	channelName := "ownTrades"
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	err := ws.subscribePrivate(channelName, payload, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribeprivate method | %w", err)
+	}
+	return nil
+}
+
+// Unsubscribes from "ownTrades" WebSocket channel.
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeOwnTrades()
+//	if err != nil...
+func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
+	channelName := "ownTrades"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// TODO test
+// TODO write docstrings with example usage
+// TODO implement functional options for consolidate_taker and snapshot
+// Subscribes to "openOrders" authenticated WebSocket channel. Must pass a valid
+// callback function to dictate what to do with incoming data.
+//
+// # Example Usage:
+func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback) error {
+	channelName := "openOrders"
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	err := ws.subscribePrivate(channelName, payload, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribeprivate method | %w", err)
+	}
+	return nil
+}
+
+// Unsubscribes from "openOrders" authenticated WebSocket channel.
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeOpenOrders()
+//	if err != nil...
+func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
+	channelName := "openOrders"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
 // #endregion
 
 // #region *WebSocketManager helper methods (subscribe, readers, routers, and connections)
@@ -594,12 +681,88 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	return nil
 }
 
+// Helper method for private data subscribe methods to handle initializing
+// Subscription, sending payload to server, and starting go routine with
+// channels to listen for incoming messages. Payload must include unexpired
+// WebSocket token.
+func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callback GenericCallback) error {
+	if callback == nil {
+		return fmt.Errorf("callback function must not be nil")
+	}
+	if !privateChannelNames[channelName] {
+		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
+	}
+
+	sub := newSub(channelName, "", callback)
+
+	// Assign Subscription to map
+	ws.SubscriptionMgr.Mutex.Lock()
+	ws.SubscriptionMgr.PrivateSubscriptions[channelName] = sub
+	ws.SubscriptionMgr.Mutex.Unlock()
+
+	// Build payload and send subscription message
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		err = fmt.Errorf("error writing subscription message | %w", err)
+		return err
+	}
+
+	// Start go routine listen for incoming data and call callback functions
+	go func() {
+		<-sub.ConfirmedChan // wait for subscription confirmed
+		for {
+			select {
+			case data := <-sub.DataChan:
+				if sub.DataChanClosed == 0 { // channel is open
+					sub.Callback(data)
+				}
+			case <-sub.DoneChan:
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map
+					ws.SubscriptionMgr.Mutex.Lock()
+					delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+					ws.SubscriptionMgr.Mutex.Unlock()
+					return
+				}
+			}
+		}
+	}()
+	return nil
+}
+
 // Starts a goroutine that continuously reads messages from the WebSocket
 // connection. If the message is not a heartbeat message, it routes the message.
 func (ws *WebSocketManager) startMessageReader() {
 	go func() {
 		for {
 			_, msg, err := ws.WebSocketClient.ReadMessage()
+			if err != nil {
+				log.Println("error reading message | ", err)
+				// TODO figure out reconnect logic, reconnect here? route error to somewhere else?
+				// TODO this error occurs if connect, subscribe, unsubscribe, subscribe, unsubscribe
+				// TODO from AUTHENTICATED. but somehow the private reader threw this error?
+				if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
+					log.Println("re-initializing websocket client")
+				}
+				continue
+			}
+			if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
+				err := ws.routeMessage(msg)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+		}
+	}()
+}
+
+// Starts a goroutine that continuously reads messages from the private WebSocket
+// connection. If the message is not a heartbeat message, it routes the message.
+func (ws *WebSocketManager) startAuthMessageReader() {
+	go func() {
+		for {
+			_, msg, err := ws.AuthWebSocketClient.ReadMessage()
 			if err != nil {
 				log.Println("error reading message | ", err)
 				continue
@@ -700,7 +863,16 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error {
-	//TODO implement this
+	switch v := msg.Content.(type) {
+	case WSOwnTradesResp:
+		if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChan <- v
+		}
+	case WSOpenOrdersResp:
+		if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChan <- v
+		}
+	}
 	return nil
 }
 
@@ -801,26 +973,21 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 // 	return nil
 // }
 
-func (ws *WebSocketManager) dialKraken() error {
+func (ws *WebSocketManager) dialKraken(url string) error {
 	ws.Mutex.Lock()
 	defer ws.Mutex.Unlock()
-	conn, _, err := websocket.DefaultDialer.Dial(wsPublicURL, http.Header{})
+	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{})
 
 	if err != nil {
 		err = fmt.Errorf("error dialing kraken | %w", err)
 		return err
 	}
-	ws.WebSocketClient = conn
-	// var initResponse WSSystemStatus
-	// err = ws.WebSocketClient.ReadJSON(&initResponse)
-	// if err != nil {
-	// 	err = fmt.Errorf("error reading json | %w", err)
-	// 	return err
-	// }
-	// if !(initResponse.Event == "systemStatus" && initResponse.Status == "online") {
-	// 	err = fmt.Errorf("error establishing websockets connection. system status | %s", initResponse.Status)
-	// 	return err
-	// }
+	switch url {
+	case wsPublicURL:
+		ws.WebSocketClient = conn
+	case wsPrivateURL:
+		ws.AuthWebSocketClient = conn
+	}
 	return nil
 }
 
