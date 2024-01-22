@@ -26,6 +26,7 @@ import (
 // TODO add OrderManager to keep current state of open trades in memory
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO add trades logger and initializer to write trades to file
+// TODO test if callbacks can be nil and end user can access channels with go routines
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -149,63 +150,66 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 	return nil
 }
 
-// // TODO finish implementation
-// // TODO test
-// // TODO write docstrings
-// func (ws *WebSocketManager) UnsubscribeAll() error {
-// 	ws.SubscriptionMgr.Mutex.Lock()
-// 	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
-// 		switch channelName {
-// 		case "ownTrades":
-// 			err := ws.UnsubscribeOwnTrades(ws.WebSocketToken)
-// 			if err != nil {
-// 				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
-// 			}
-// 		case "openOrders":
-// 			err := ws.UnsubscribeOpenOrders(ws.WebSocketToken)
-// 			if err != nil {
-// 				return fmt.Errorf("error unsubscribing from openorders | %w", err)
-// 			}
-// 		default:
-// 			return fmt.Errorf("unknown channel name %s", channelName)
-// 		}
-// 	}
-// 	for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
-// 		switch {
-// 		case channelName == "ticker":
-// 			for pair := range pairMap {
-// 				ws.UnsubscribeTicker(pair)
-// 			}
-// 		case channelName == "trade":
-// 			for pair := range pairMap {
-// 				ws.UnsubscribeTrade(pair)
-// 			}
-// 		case channelName == "spread":
-// 			for pair := range pairMap {
-// 				ws.UnsubscribeSpread(pair)
-// 			}
-// 		case strings.HasPrefix(channelName, "ohlc"):
-// 			_, intervalStr, _ := strings.Cut(channelName, "-")
-// 			interval, err := strconv.ParseUint(intervalStr, 10, 16)
-// 			if err != nil {
-// 				return fmt.Errorf("error parsing uint from interval | %w", err)
-// 			}
-// 			for pair := range pairMap {
-// 				ws.UnsubscribeOHLC(pair, uint16(interval))
-// 			}
-// 		case strings.HasPrefix(channelName, "book"):
-// 			_, depthStr, _ := strings.Cut(channelName, "-")
-// 			depth, err := strconv.ParseUint(depthStr, 10, 16)
-// 			if err != nil {
-// 				return fmt.Errorf("error parsing uint from depth | %w", err)
-// 			}
-// 			for pair := range pairMap {
-// 				ws.UnsubscribeBook(pair, uint16(depth))
-// 			}
-// 		}
-// 	}
-// 	return nil
-// }
+// Iterates through all open public and private subscriptions and sends an
+// unsubscribe message to Kraken's WebSocket server for each.
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeAll()
+func (ws *WebSocketManager) UnsubscribeAll() error {
+	ws.SubscriptionMgr.Mutex.Lock()
+	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
+		switch channelName {
+		case "ownTrades":
+			err := ws.UnsubscribeOwnTrades()
+			if err != nil {
+				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
+			}
+		case "openOrders":
+			err := ws.UnsubscribeOpenOrders()
+			if err != nil {
+				return fmt.Errorf("error unsubscribing from openorders | %w", err)
+			}
+		default:
+			return fmt.Errorf("unknown channel name %s", channelName)
+		}
+	}
+	for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
+		switch {
+		case channelName == "ticker":
+			for pair := range pairMap {
+				ws.UnsubscribeTicker(pair)
+			}
+		case channelName == "trade":
+			for pair := range pairMap {
+				ws.UnsubscribeTrade(pair)
+			}
+		case channelName == "spread":
+			for pair := range pairMap {
+				ws.UnsubscribeSpread(pair)
+			}
+		case strings.HasPrefix(channelName, "ohlc"):
+			_, intervalStr, _ := strings.Cut(channelName, "-")
+			interval, err := strconv.ParseUint(intervalStr, 10, 16)
+			if err != nil {
+				return fmt.Errorf("error parsing uint from interval | %w", err)
+			}
+			for pair := range pairMap {
+				ws.UnsubscribeOHLC(pair, uint16(interval))
+			}
+		case strings.HasPrefix(channelName, "book"):
+			_, depthStr, _ := strings.Cut(channelName, "-")
+			depth, err := strconv.ParseUint(depthStr, 10, 16)
+			if err != nil {
+				return fmt.Errorf("error parsing uint from depth | %w", err)
+			}
+			for pair := range pairMap {
+				ws.UnsubscribeBook(pair, uint16(depth))
+			}
+		}
+	}
+	return nil
+}
 
 // Subscribes to "ticker" WebSocket channel for arg 'pair'. Must pass a valid
 // callback function to dictate what to do with incoming data.
@@ -1198,9 +1202,13 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			switch subscriptionStatusMsg.Status {
 			case "subscribed":
 				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].confirmSubscription()
+					if ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].ConfirmedChanClosed == 0 {
+						ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].confirmSubscription()
+					}
 				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].confirmSubscription()
+					if ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].ConfirmedChanClosed == 0 {
+						ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].confirmSubscription()
+					}
 				}
 			case "unsubscribed":
 				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
@@ -1310,6 +1318,7 @@ func (s *Subscription) unsubscribe() {
 
 // Closes the s.ConfirmedChan to signal that the subscription is confirmed.
 func (s *Subscription) confirmSubscription() {
+	atomic.StoreInt32(&s.ConfirmedChanClosed, 1)
 	close(s.ConfirmedChan)
 }
 
@@ -1324,14 +1333,15 @@ func (s *Subscription) closeChannels() {
 // Helper function to build default new *Subscription data type
 func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 	return &Subscription{
-		ChannelName:    channelName,
-		Pair:           pair,
-		Callback:       callback,
-		DataChan:       make(chan interface{}),
-		DoneChan:       make(chan struct{}),
-		ConfirmedChan:  make(chan struct{}),
-		DataChanClosed: 0,
-		DoneChanClosed: 0,
+		ChannelName:         channelName,
+		Pair:                pair,
+		Callback:            callback,
+		DataChan:            make(chan interface{}),
+		DoneChan:            make(chan struct{}),
+		ConfirmedChan:       make(chan struct{}),
+		DataChanClosed:      0,
+		DoneChanClosed:      0,
+		ConfirmedChanClosed: 0,
 	}
 }
 

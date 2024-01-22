@@ -68,14 +68,15 @@ type SubscriptionManager struct {
 }
 
 type Subscription struct {
-	ChannelName    string
-	Pair           string
-	ConfirmedChan  chan struct{}
-	DataChan       chan interface{}
-	DoneChan       chan struct{}
-	DataChanClosed int32
-	DoneChanClosed int32
-	Callback       GenericCallback
+	ChannelName         string
+	Pair                string
+	DataChan            chan interface{}
+	DoneChan            chan struct{}
+	ConfirmedChan       chan struct{}
+	DataChanClosed      int32
+	DoneChanClosed      int32
+	ConfirmedChanClosed int32
+	Callback            GenericCallback
 }
 
 type GenericCallback func(data interface{})
