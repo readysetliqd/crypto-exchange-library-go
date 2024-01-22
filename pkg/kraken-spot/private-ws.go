@@ -16,7 +16,14 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// #region Exported *KrakenClient and *WebSocketManager methods (Connect Subscribe<> and Unsubscribe<>)
+// TODO write a connect public only method
+// TODO write a connect private only method
+// TODO move all the public methods to its own file or rename this one
+// TODO add order response callback initializer method and add callback to ws manager struct
+// TODO add optional reqid to ALL websocket requests
+// TODO write a SetLogger method and add Logger to WebSocketManager struct
+
+// #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
 // TODO update docstrings after connect public and private only methods are written
 // Creates both authenticated and public connections to Kraken WebSocket server.
@@ -137,11 +144,6 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
-
-// TODO write a connect public only method
-// TODO write a connect private only method
-
-// TODO write a SetLogger method and add Logger to WebSocketManager struct
 
 // // TODO finish implementation
 // // TODO test
@@ -657,6 +659,122 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
 
 // #endregion
 
+// #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s))
+
+// TODO fill in required args (if any)
+// TODO change event
+// TODO change payload as necessary (look for required args)
+// TODO (optional) add functional options and for loop to write buffer and add to payload
+// TODO add case to GenericMessage custom UnmarshalJSON method
+// TODO add case to route<messageType>Message method
+// TODO write docstrings, enums, functional options, example usage
+//
+// Sends an 'orderType' order request on the side 'direction' (buy or sell) of
+// amount/qty/size 'volume' for the specified 'pair' passed to args to Kraken's
+// WebSocket server. See functions passable to 'orderType' below which may have
+// required 'price' args included. Accepts none or many functional options passed
+// to arg 'options' which can modify order behavior. Functional options listed
+// below may conflict with eachother or have certain argument requirements. Only
+// brief docstrings are included here, check each function's individual documentation
+// for further related notes and nuance.
+//
+// # WSOrderType functions:
+//
+//	// Instantly market orders in at best current prices
+//	func WSMarket() WSOrderType
+//	// Order type of "limit" where arg 'price' is the level at which the limit order will be placed ...
+//	func WSLimit(price string) WSOrderType
+//	// Order type of "stop-loss" order type where arg 'price' is the stop loss trigger price ...
+//	func WSStopLoss(price string) WSOrderType
+//	// Order type of "take-profit" where arg 'price' is the take profit trigger price ...
+//	func WSTakeProfit(price string) WSOrderType
+//	// Order type of "stop-loss-limit" where arg 'price' is the stop loss trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSStopLossLimit(price, price2 string) WSOrderType
+//	// Order type of "take-profit-limit" where arg 'price' is the take profit trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSTakeProfitLimit(price, price2 string) WSOrderType
+//	// Order type of "trailing-stop" where arg 'price' is the relative stop trigger price ...
+//	func WSTrailingStop(price string) WSOrderType
+//	// Order type of "trailing-stop-limit" where arg 'price' is the relative stop trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSTrailingStopLimit(price, price2 string) WSOrderType
+//	// Order type of "settle-position". Settles any open margin position of same 'direction' and 'pair' by amount 'volume' ...
+//	func WSSettlePosition(leverage string) WSOrderType
+//
+// # Enums:
+//
+// 'direction': "buy", "sell"
+//
+// 'volume': ["0"...] Call Kraken API with *KrakenClient.GetTradeablePairsInfo(pair)
+// field 'OrderMin' for specific pairs minimum order size
+//
+// 'pair': Call Kraken API with *KrakenClient.ListWebsocketNames() method for
+// available tradeable pairs WebSocket names
+//
+// # Functional Options:
+//
+//	// User reference id 'userref' is an optional user-specified integer id that can be associated with any number of orders ...
+//	func WSUserRef(userRef string) WSAddOrderOption
+//	// Amount of leverage desired. Defaults to no leverage if function is not called. API accepts string of any number; in practice, must be some integer >= 2 ...
+//	func WSLeverage(leverage string) WSAddOrderOption
+//	// If true, order will only reduce a currently open position, not increase it or open a new position. Defaults to false if not passed ...
+//	func WSReduceOnly() WSAddOrderOption
+//	// Add all desired order 'flags' as a single comma-delimited list. Use either this function or call (one or many) the individual flag functions below ...
+//	func WSOrderFlags(flags string) WSAddOrderOption
+//	// Post-only order (available when ordertype = limit)
+//	func WSPostOnly() WSAddOrderOption
+//	// Prefer fee in base currency (default if selling) ...
+//	func WSFCIB() WSAddOrderOption
+//	// Prefer fee in quote currency (default if buying) ...
+//	func WSFCIQ() WSAddOrderOption
+//	// Disables market price protection for market orders
+//	func WSNOMPP() WSAddOrderOption
+//
+// ~// Order volume expressed in quote currency. This is supported only for market orders ...~
+// ~func WSVIQC() WSAddOrderOption~
+//
+//	// Time-in-force of the order to specify how long it should remain in the order book before being cancelled. Overrides default value with "IOC" (Immediate Or Cancel) ...
+//	func WSImmediateOrCancel() WSAddOrderOption
+//	// Time-in-force of the order to specify how long it should remain in the order book before being cancelled. Overrides default value with "GTD" (Good Til Date) ...
+//	func WSGoodTilDate(expireTime string) WSAddOrderOption
+//	// Conditional close of "limit" order type where arg 'price' is the level at which the limit order will be placed ...
+//	func WSCloseLimit(price string) WSAddOrderOption
+//	// Conditional close of "stop-loss" order type where arg 'price' is the stop loss trigger price ...
+//	func WSCloseStopLoss(price string) WSAddOrderOption
+//	// Conditional close of "take-profit" order type where arg 'price' is the take profit trigger price ...
+//	func WSCloseTakeProfit(price string) WSAddOrderOption
+//	// Conditional close of "stop-loss-limit" order type where arg 'price' is the stop loss trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSCloseStopLossLimit(price, price2 string) WSAddOrderOption
+//	// Conditional close of "take-profit-limit" order type where arg 'price' is the take profit trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSCloseTakeProfitLimit(price, price2 string) WSAddOrderOption
+//	// Conditional close of "trailing-stop" order type where arg 'price' is the relative stop trigger price ...
+//	func WSCloseTrailingStop(price string) WSAddOrderOption
+//	// Conditional close of "trailing-stop-limit" order type where arg 'price' is the relative stop trigger price and arg 'price2' is the limit order that will be placed ...
+//	func WSCloseTrailingStopLimit(price, price2 string) WSAddOrderOption
+//	// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching engine should reject the new order request to arg 'deadline' ...
+//	func WSAddWithDeadline(deadline string) WSAddOrderOption
+//	// Validates inputs only. Does not submit order. Defaults to "false" if not called.
+//	func WSValidateAddOrder() WSAddOrderOption
+//
+// # Example Usage:
+//
+//	// Sends a post only buy limit order request at price level 42100.20 on Bitcoin for 1.0 BTC. On filling, will open an opposite side sell order at price 44000
+//	err := kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
+func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume, pair string, options ...WSAddOrderOption) error {
+	var buffer bytes.Buffer
+	orderType(&buffer)
+	for _, option := range options {
+		option(&buffer)
+	}
+	event := "addOrder"
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "type": "%s", "volume": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, direction, volume, pair, buffer.String())
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// #endregion
+
 // #region *WebSocketManager helper methods (subscribe, readers, routers, and connections)
 
 // Helper method for public data subscribe methods to handle initializing
@@ -908,10 +1026,16 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
-	//TODO implement this
+	switch v := msg.Content.(type) {
+	case WSAddOrderResp:
+		if ws.OrderStatusCallback != nil {
+			ws.OrderStatusCallback(v)
+		}
+	}
 	return nil
 }
 
+// TODO change to switch msg.Content.(type) and remove assertions
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
@@ -948,8 +1072,6 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 		} else {
 			if ws.SystemStatusCallback != nil {
 				ws.SystemStatusCallback(systemStatusMsg.Status)
-			} else {
-				log.Printf("system status: %s", systemStatusMsg.Status)
 			}
 		}
 	case "pong":

@@ -867,6 +867,12 @@ func (gm *GenericMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("error unmarshalling pong msg | %w", err)
 		}
 		gm.Content = msg
+	case "addOrderStatus":
+		var msg WSAddOrderResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling addorderstatus msg | %w", err)
+		}
+		gm.Content = msg
 	default:
 		return fmt.Errorf("unknown event type | %s", gm.Event)
 	}
@@ -1578,6 +1584,53 @@ type InternalBookEntry struct {
 type BookState struct {
 	Asks *[]InternalBookEntry
 	Bids *[]InternalBookEntry
+}
+
+// #endregion
+
+// #region Private WebSockets Order response data structs
+
+type WSAddOrderResp struct {
+	Event        string `json:"event"`
+	RequestID    int    `json:"reqid"`
+	Status       string `json:"status"`
+	TxID         string `json:"txid"`
+	Description  string `json:"descr"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+type WSEditOrderResp struct {
+	Event        string `json:"event"`
+	RequestID    int    `json:"reqid"`
+	Status       string `json:"status"`
+	TxID         string `json:"txid"`
+	OriginalTxID string `json:"originaltxid"`
+	Description  string `json:"descr"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+type WSCancelOrderResp struct {
+	Event        string `json:"event"`
+	RequestID    int    `json:"reqid"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+type WSCancelAllResp struct {
+	Event        string `json:"event"`
+	RequestID    int    `json:"reqid"`
+	Count        int    `json:"count"`
+	Status       string `json:"status"`
+	ErrorMessage string `json:"errorMessage"`
+}
+
+type WSCancelAllAfterResp struct {
+	Event        string `json:"event"`
+	RequestID    int    `json:"reqid"`
+	Status       string `json:"status"`
+	CurrentTime  string `json:"currentTime"`
+	TriggerTime  string `json:"triggerTime"`
+	ErrorMessage string `json:"errorMessage"`
 }
 
 // #endregion

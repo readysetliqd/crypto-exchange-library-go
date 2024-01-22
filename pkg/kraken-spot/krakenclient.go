@@ -52,6 +52,7 @@ type WebSocketManager struct {
 	SubscriptionMgr      *SubscriptionManager
 	OrderBookMgr         *OrderBookManager
 	SystemStatusCallback func(status string)
+	OrderStatusCallback  func(orderStatus interface{})
 	Mutex                sync.RWMutex
 }
 

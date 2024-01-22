@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // #region Private Account Data endpoints functional options
@@ -420,7 +421,7 @@ func RLWithEnd(end int) RequestLedgersExportReportOption {
 
 // #endregion
 
-// #region Private Trading endpoints functional options
+// #region Private REST API Trading endpoints functional options
 
 type OrderType func(payload url.Values)
 
@@ -1001,7 +1002,7 @@ func AddWithDeadline(deadline string) AddOrderOption {
 	}
 }
 
-// Validates inputs only. Do not submit order. Defaults to "false" if not called.
+// Validates inputs only. Does not submit order. Defaults to "false" if not called.
 func ValidateAddOrder() AddOrderOption {
 	return func(payload url.Values) {
 		payload.Add("validate", "true")
@@ -1547,6 +1548,539 @@ type SubscribeOpenOrdersOption func(buffer *bytes.Buffer)
 func WithRateCounter() SubscribeOpenOrdersOption {
 	return func(buffer *bytes.Buffer) {
 		buffer.WriteString(`, "ratecounter": true`)
+	}
+}
+
+// #endregion
+
+// #region Private WebSocket Trading methods functional options
+
+type WSOrderType func(buffer *bytes.Buffer)
+
+// Instantly market orders in at best current prices
+func WSMarket() WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "ordertype": "market"`)
+	}
+}
+
+// Order type of "limit" where arg 'price' is the level at which the limit order
+// will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSLimit(price string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "limit", "price": "%s"`, price))
+	}
+}
+
+// Order type of "stop-loss" order type where arg 'price' is the stop loss
+// trigger price
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSStopLoss(price string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "stop-loss", "price": "%s"`, price))
+	}
+}
+
+// Order type of "take-profit" where arg 'price' is the take profit trigger price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSTakeProfit(price string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "take-profit", "price": "%s"`, price))
+	}
+}
+
+// Order type of "stop-loss-limit" where arg 'price' is the stop loss trigger
+// price and arg 'price2' is the limit order that will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSStopLossLimit(price, price2 string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "stop-loss-limit", "price": "%s", "price2": "%s"`, price, price2))
+	}
+}
+
+// Order type of "take-profit-limit" where arg 'price' is the take profit trigger
+// price and arg 'price2' is the limit order that will be placed.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSTakeProfitLimit(price, price2 string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "take-profit-limit", "price": "%s", "price2": "%s"`, price, price2))
+	}
+}
+
+// Order type of "trailing-stop" where arg 'price' is the relative stop trigger
+// price.
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSTrailingStop(price string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "trailing-stop", "price": "%s"`, price))
+	}
+}
+
+// Order type of "trailing-stop-limit" where arg 'price' is the relative stop
+// trigger price and arg 'price2' is the limit order that will be placed.
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Note: In practice, the system will accept either relative or specific (without +
+// or -) for arg 'price2' despite what the docs say. The note is included here
+// just in case; Kraken API docs: Must use a relative price for this field, namely
+// one of the + or - prefixes. This will provide the offset from the trigger price
+// to the limit price, i.e. +0 would set the limit price equal to the trigger price.
+// The % suffix also works for this field to use a relative percentage limit price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSTrailingStopLimit(price, price2 string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "trailing-stop-limit", "price": "%s", "price2": "%s"`, price, price2))
+	}
+}
+
+// Order type of "settle-position". Settles any open margin position of same
+// 'direction' and 'pair' by amount 'volume'
+//
+// Note: AddOrder() arg 'volume' can be set to "0" for closing margin orders to
+// automatically fill the requisite quantity
+//
+// Note: Required arg 'leverage' is a required parameter by the API, but in
+// practice can be any valid value. Value of 'leverage' here has no effect as
+// leverage is already set by the opened position.
+func WSSettlePosition(leverage string) WSOrderType {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "ordertype": "settle-position", "leverage": %s`, leverage))
+	}
+}
+
+type WSAddOrderOption func(buffer *bytes.Buffer)
+
+// User reference id 'userref' is an optional user-specified integer id that
+// can be associated with any number of orders. Many clients choose a userref
+// corresponding to a unique integer id generated by their systems (e.g. a
+// timestamp). However, because we don't enforce uniqueness on our side, it
+// can also be used to easily group orders by pair, side, strategy, etc. This
+// allows clients to more readily cancel or query information about orders in
+// a particular group, with fewer API calls by using userref instead of our
+// txid, where supported.
+func WSUserRef(userRef string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "userref": "%s"`, userRef))
+	}
+}
+
+// Amount of leverage desired. Defaults to no leverage if function is not called.
+// API accepts string of any number; in practice, must be some integer >= 2
+//
+// Note: This function should not be used when calling AddOrder() with the
+// SettlePosition() 'orderType'
+func WSLeverage(leverage string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "leverage": %s`, leverage))
+	}
+}
+
+// If true, order will only reduce a currently open position, not increase it
+// or open a new position. Defaults to false if not passed.
+//
+// Note: ReduceOnly() is only usable with leveraged orders. This includes orders
+// of 'orderType' SettlePosition() and orders with Leverage() passed to 'options'
+func WSReduceOnly() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "reduce_only": true`)
+	}
+}
+
+// Add all desired order 'flags' as a single comma-delimited list. Use either
+// this function or call (one or many) the individual flag functions below.
+//
+// Note: "post" is only available for WSLimit() type orders. "nompp" is only
+// available for WSMarket() type orders
+//
+// CAUTION: "fciq" and "fcib" are mutually exclusive, only call one or neither
+// at a time
+//
+// CAUTION: Do not pass this function with any of WSPostOnly(), WSFCIB(), WSFCIQ(),
+// WSNOMPP(), WSVIQC()
+//
+// # Enums:
+//
+// 'flags': "post", "fciq", "fcib", "nompp", ~"viqc"~
+//
+// # Example Usage:
+//
+//	kc.WSAddOrder(WSLimit("42100.2"), "XBT/USD", "1.0", WSOrderFlags("post,fciq"))
+func WSOrderFlags(flags string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "oflags": "%s"`, flags))
+	}
+}
+
+// Post-only order (available when ordertype = limit)
+func WSPostOnly() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		bufferAddFlag(buffer, "post")
+	}
+}
+
+// Prefer fee in base currency (default if selling)
+//
+// CAUTION: Mutually exclusive with FCIQ(). Only call one of these two at a time
+func WSFCIB() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		bufferAddFlag(buffer, "fcib")
+	}
+}
+
+// Prefer fee in quote currency (default if buying)
+//
+// CAUTION: Mutually exclusive with FCIB(). Only call one of these two at a time
+func WSFCIQ() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		bufferAddFlag(buffer, "fciq")
+	}
+}
+
+// Disables market price protection for market orders
+func WSNOMPP() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		bufferAddFlag(buffer, "nompp")
+	}
+}
+
+// Order volume expressed in quote currency. This is supported only for market
+// orders.
+//
+// Note: Not currently available
+func WSVIQC() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		bufferAddFlag(buffer, "viqc")
+	}
+}
+
+// Inserts comma delimited flag string to 'oflags' value or writes new 'oflags'
+// if it doesn't exist
+func bufferAddFlag(buffer *bytes.Buffer, flag string) {
+	bufferStr := buffer.String()
+	index := strings.Index(bufferStr, "oflags")
+	if index == -1 { // oflags doesnt exist
+		buffer.WriteString(fmt.Sprintf(`, "oflags": "%s"`, flag))
+	} else { // oflags exists
+		for i := 0; i < 3; i++ {
+			index = strings.Index(bufferStr[index+1:], `"`) + index + 1
+		}
+		newBufferStr := bufferStr[:index] + "," + flag + bufferStr[index:]
+		buffer.Reset()
+		buffer.WriteString(newBufferStr)
+	}
+}
+
+// Time-in-force of the order to specify how long it should remain in the order
+// book before being cancelled. Overrides default value with "IOC" (Immediate Or
+// Cancel). IOC will immediately execute the amount possible and cancel any
+// remaining balance rather than resting in the book. Defaults to "GTC" (Good
+// 'Til Canceled) if function is not called.
+//
+// CAUTION: Mutually exclusive with GoodTilDate(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "timeinforce"
+// value will be overridden.
+func WSImmediateOrCancel() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "timeinforce": "IOC"`)
+	}
+}
+
+// Time-in-force of the order to specify how long it should remain in the order
+// book before being cancelled. Overrides default value with "GTD" (Good Til Date).
+// GTD, if called, will cause the order to expire at specified unix time passed
+// to arg 'expireTime'. Expiration time, can be specified as an absolute timestamp
+// or as a number of seconds in the future:
+//
+// 0 no expiration (default)
+//
+// <n> = unix timestamp of expiration time
+//
+// +<n> = expire <n> seconds from now, minimum 5 seconds
+//
+// Note: URL encoding of the + character changes it to a space, so please use
+// %2b followed by the number of seconds instead of +
+//
+// CAUTION: Mutually exclusive with ImmediateOrCancel(). Only one of these two functions
+// should be called, if any. Order will still pass as valid but one "timeinforce"
+// value will be overridden.
+func WSGoodTilDate(expireTime string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "timeinforce": "GTD", "expiretm": "%s"`, expireTime))
+	}
+}
+
+// Conditional close of "limit" order type where arg 'price' is the level at which
+// the limit order will be placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseLimit(price string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "limit", "close[price]": "%s"`, price))
+	}
+}
+
+// Conditional close of "stop-loss" order type where arg 'price' is the stop
+// loss trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseStopLoss(price string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "stop-loss", "close[price]": "%s"`, price))
+	}
+}
+
+// Conditional close of "take-profit" order type where arg 'price' is the take
+// profit trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseTakeProfit(price string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "take-profit", "close[price]": "%s"`, price))
+	}
+}
+
+// Conditional close of "stop-loss-limit" order type where arg 'price' is the
+// stop loss trigger price and arg 'price2' is the limit order that will be placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseStopLossLimit(price, price2 string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "stop-loss-limit", "close[price]": "%s", "close[price2]": "%s"`, price, price2))
+	}
+}
+
+// Conditional close of "take-profit-limit" order type where arg 'price' is the
+// take profit trigger price and arg 'price2' is the limit order that will be
+// placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseTakeProfitLimit(price, price2 string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "take-profit-limit", "close[price]": "%s", "close[price2]": "%s"`, price, price2))
+	}
+}
+
+// Conditional close of "trailing-stop" order type where arg 'price' is the relative
+// stop trigger price.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseTrailingStop(price string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "trailing-stop", "close[price]": "%s"`, price))
+	}
+}
+
+// Conditional close of "trailing-stop-limit" order type where arg 'price' is the
+// relative stop trigger price and arg 'price2' is the limit order that will be
+// placed.
+//
+// CAUTION: Mutually exclusive with other conditional close order functions.
+// Only one conditional close order function with format WSClose<orderType>()
+// should be passed at a time. If more than one are passed, it will override the
+// previous function calls.
+//
+// Conditional Close Orders: Orders that are triggered by execution of the
+// primary order in the same quantity and opposite direction, but once triggered
+// are independent orders that may reduce or increase net position
+//
+// Note: Required arg 'price' must use a relative price for this field, namely
+// the + prefix, from which the direction will be automatic based on if the
+// original order is a buy or sell (no need to use - or #). The % suffix also
+// works for these order types to use a relative percentage price.
+//
+// Note: In practice, the system will accept either relative or specific (without +
+// or -) for arg 'price2' despite what the docs say. The note is included here
+// just in case; Kraken API docs: Must use a relative price for this field, namely
+// one of the + or - prefixes. This will provide the offset from the trigger price
+// to the limit price, i.e. +0 would set the limit price equal to the trigger price.
+// The % suffix also works for this field to use a relative percentage limit price.
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+func WSCloseTrailingStopLimit(price, price2 string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "close[ordertype]": "trailing-stop-limit", "close[price]": "%s", "close[price2]": "%s"`, price, price2))
+	}
+}
+
+// Pass RFC3339 timestamp (e.g. 2021-04-01T00:18:45Z) after which the matching
+// engine should reject the new order request to arg 'deadline'.
+//
+// In presence of latency or order queueing: min now() + 2 seconds, max now() +
+// 60 seconds.
+//
+// Example Usage:
+//
+// WSAddWithDeadline(time.Now().Add(time.Second*30).Format(time.RFC3339))
+func WSAddWithDeadline(deadline string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "deadline": "%s"`, deadline))
+	}
+}
+
+// Validates inputs only. Does not submit order. Defaults to "false" if not called.
+func WSValidateAddOrder() WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "validate": "true"`)
 	}
 }
 
