@@ -669,14 +669,6 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
 
 // #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s))
 
-// TODO fill in required args (if any)
-// TODO change event
-// TODO change payload as necessary (look for required args)
-// TODO (optional) add functional options and for loop to write buffer and add to payload
-// TODO add case to GenericMessage custom UnmarshalJSON method
-// TODO add case to route<messageType>Message method
-// TODO write docstrings, enums, functional options, example usage
-//
 // Sends an 'orderType' order request on the side 'direction' (buy or sell) of
 // amount/qty/size 'volume' for the specified 'pair' passed to args to Kraken's
 // WebSocket server. See functions passable to 'orderType' below which may have
@@ -1190,63 +1182,46 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 	return nil
 }
 
-// TODO change to switch msg.Content.(type) and remove assertions
 // Asserts message to correct unique data type and routes to the appropriate
 // channel if channel is still open.
 func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
-	switch msg.Event {
-	case "subscriptionStatus":
-		if subscriptionStatusMsg, ok := msg.Content.(WSSubscriptionStatus); !ok {
-			return fmt.Errorf("error asserting msg.content to wssubscriptionstatus type")
-		} else {
-			switch subscriptionStatusMsg.Status {
-			case "subscribed":
-				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
-					if ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].ConfirmedChanClosed == 0 {
-						ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].confirmSubscription()
-					}
-				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
-					if ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].ConfirmedChanClosed == 0 {
-						ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].confirmSubscription()
-					}
+	switch v := msg.Content.(type) {
+	case WSSubscriptionStatus:
+		switch v.Status {
+		case "subscribed":
+			if publicChannelNames[v.ChannelName] {
+				if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].ConfirmedChanClosed == 0 {
+					ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].confirmSubscription()
 				}
-			case "unsubscribed":
-				if publicChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PublicSubscriptions[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].unsubscribe()
-					if strings.HasPrefix(subscriptionStatusMsg.ChannelName, "book") {
-						ws.OrderBookMgr.OrderBooks[subscriptionStatusMsg.ChannelName][subscriptionStatusMsg.Pair].unsubscribe()
-					}
-				} else if privateChannelNames[subscriptionStatusMsg.ChannelName] {
-					ws.SubscriptionMgr.PrivateSubscriptions[subscriptionStatusMsg.ChannelName].unsubscribe()
+			} else if privateChannelNames[v.ChannelName] {
+				if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].ConfirmedChanClosed == 0 {
+					ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].confirmSubscription()
 				}
-			case "error":
-				return fmt.Errorf("subscribe/unsubscribe error msg received. operation not completed; check inputs and try again | %s", subscriptionStatusMsg.ErrorMessage)
-			default:
-				return fmt.Errorf("cannot route unknown subscriptionStatus status | %s", subscriptionStatusMsg.Status)
 			}
-		}
-	case "systemStatus":
-		if systemStatusMsg, ok := msg.Content.(WSSystemStatus); !ok {
-			return fmt.Errorf("error asserting msg.content to wssystemstatus type")
-		} else {
-			if ws.SystemStatusCallback != nil {
-				ws.SystemStatusCallback(systemStatusMsg.Status)
+		case "unsubscribed":
+			if publicChannelNames[v.ChannelName] {
+				ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].unsubscribe()
+				if strings.HasPrefix(v.ChannelName, "book") {
+					ws.OrderBookMgr.OrderBooks[v.ChannelName][v.Pair].unsubscribe()
+				}
+			} else if privateChannelNames[v.ChannelName] {
+				ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].unsubscribe()
 			}
+		case "error":
+			return fmt.Errorf("subscribe/unsubscribe error msg received. operation not completed; check inputs and try again | %s", v.ErrorMessage)
+		default:
+			return fmt.Errorf("cannot route unknown subscriptionStatus status | %s", v.Status)
 		}
-	case "pong":
-		if pongMsg, ok := msg.Content.(WSPong); !ok {
-			return fmt.Errorf("error asserting msg.content to wspong type")
-		} else {
-			log.Println(pongMsg.Event, pongMsg.ReqID)
+	case WSSystemStatus:
+		if ws.SystemStatusCallback != nil {
+			ws.SystemStatusCallback(v.Status)
 		}
-	case "error":
-		if eventMsg, ok := msg.Content.(WSErrorResp); !ok {
-			return fmt.Errorf("error asserting msg.content to wserrorresp type")
-		} else {
-			return fmt.Errorf("error message: %s | reqid: %d", eventMsg.ErrorMessage, eventMsg.ReqID)
-		}
+	case WSPong:
+		log.Println("pong | reqid: ", v.ReqID)
+	case WSErrorResp:
+		return fmt.Errorf("error message: %s | reqid: %d", v.ErrorMessage, v.ReqID)
 	default:
-		return fmt.Errorf("cannot route unknown event type | %s", msg.Event)
+		return fmt.Errorf("cannot route unknown msg type | %s", msg.Event)
 	}
 	return nil
 }
