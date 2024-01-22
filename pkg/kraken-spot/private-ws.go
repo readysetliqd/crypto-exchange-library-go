@@ -21,7 +21,11 @@ import (
 // TODO move all the public methods to its own file or rename this one
 // TODO add order response callback initializer method and add callback to ws manager struct
 // TODO add optional reqid to ALL websocket requests
-// TODO write a SetLogger method and add Logger to WebSocketManager struct
+// TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
+// TODO add an initializer method for orderStatusCallback
+// TODO add OrderManager to keep current state of open trades in memory
+// TODO add order writer to write all orderIDs opened during program operation in case disconnect
+// TODO add trades logger and initializer to write trades to file
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -773,6 +777,137 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	return nil
 }
 
+// Sends an edit order request for the order with same arg 'orderID' and 'pair'.
+// Must have at least one of WSNewVolume() WSNewPrice() WSNewPrice2() functional
+// options args passed to 'options', but may also have many.
+//
+// Note: OrderID, Userref, and post-only flag will all be reset with the new
+// order. Pass WSNewUserRef(userRef) with the old 'userRef' and WSNewPostOnly()
+// to 'options' to retain these values.
+//
+// # Enum:
+//
+// 'pair': Call Kraken API with *KrakenClient.ListWebsocketNames() method for
+// available tradeable pairs WebSocket names
+//
+// # Functional Options:
+//
+//	// Field "userref" is an optional user-specified integer id associated with edit request ...
+//	func WSNewUserRef(userRef string) WSEditOrderOption
+//	// Updates order quantity in terms of the base asset.
+//	func WSNewVolume(volume string) WSEditOrderOption
+//	// Updates limit price for "limit" orders. Updates trigger price for "stop-loss", "stop-loss-limit", "take-profit", "take-profit-limit", "trailing-stop" and "trailing-stop-limit" orders ...
+//	func WSNewPrice(price string) WSEditOrderOption
+//	// Updates limit price for "stop-loss-limit", "take-profit-limit" and "trailing-stop-limit" orders ...
+//	func WSNewPrice2(price2 string) WSEditOrderOption
+//	// Post-only order (available when ordertype = limit). All the flags from the parent order are retained except post-only. Post-only needs to be explicitly mentioned on every edit request.
+//	func WSNewPostOnly() WSEditOrderOption
+//	// Validate inputs only. Do not submit order. Defaults to false if not called.
+//	func WSValidateEditOrder() WSEditOrderOption
+//
+// # Example Usage:
+//
+//	kc.WSEditOrder("O26VH7-COEPR-YFYXLK", "XBT/USD", ks.WSNewPrice("21000"), krakenspot.WSNewPostOnly(), krakenspot.WSValidateEditOrder())
+func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditOrderOption) error {
+	var buffer bytes.Buffer
+	for _, option := range options {
+		option(&buffer)
+	}
+	event := "editOrder"
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "orderid": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, orderID, pair, buffer.String())
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// Sends a cancel order request to Kraken's authenticated WebSocket server to
+// cancel order with specified arg 'orderID'.
+//
+// # Example Usage:
+//
+//	err := kc.WSCancelOrder("O26VH7-COEPR-YFYXLK")
+func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
+	event := "cancelOrder"
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": ["%s"]}`, event, ws.WebSocketToken, orderID)
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// Sends a cancel order request to Kraken's authenticated WebSocket server to
+// cancel multiple orders with specified orderIDs passed to slice 'orderIDs'.
+//
+// # Example Usage:
+//
+//	err := kc.WSCancelOrder([]string{"O26VH7-COEPR-YFYXLK", "OGTT3Y-C6I3P-X2I6HX"})
+func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
+	event := "cancelOrder"
+	ordersJSON, err := json.Marshal(orderIDs)
+	if err != nil {
+		return fmt.Errorf("error marshalling order ids to json | %w", err)
+	}
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": %s}`, event, ws.WebSocketToken, string(ordersJSON))
+	err = ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// Sends a request to Kraken's authenticated WebSocket server to cancel all open
+// orders including partially filled orders.
+//
+// # Example Usage:
+//
+//	err := kc.WSCancelAllOrders()
+func (ws *WebSocketManager) WSCancelAllOrders() error {
+	event := "cancelAll"
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s"}`, event, ws.WebSocketToken)
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
+// Sends a cancelAllOrdersAfter request to Kraken's authenticated WebSocket
+// server that activates a countdown timer of 'timeout' number of seconds/
+//
+// Note: From the Kraken Docs  cancelAllOrdersAfter provides a "Dead Man's
+// Switch" mechanism to protect the client from network malfunction, extreme
+// latency or unexpected matching engine downtime. The client can send a request
+// with a timeout (in seconds), that will start a countdown timer which will
+// cancel *all* client orders when the timer expires. The client has to keep
+// sending new requests to push back the trigger time, or deactivate the mechanism
+// by specifying a timeout of 0. If the timer expires, all orders are cancelled
+// and then the timer remains disabled until the client provides a new (non-zero)
+// timeout.
+//
+// The recommended use is to make a call every 15 to 30 seconds, providing a
+// timeout of 60 seconds. This allows the client to keep the orders in place in
+// case of a brief disconnection or transient delay, while keeping them safe in
+// case of a network breakdown. It is also recommended to disable the timer ahead
+// of regularly scheduled trading engine maintenance (if the timer is enabled,
+// all orders will be cancelled when the trading engine comes back from downtime
+// - planned or otherwise).
+//
+// # Example Usage:
+//
+// kc.WSCancelAllOrdersAfter("60")
+func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
+	event := "cancelAllOrdersAfter"
+	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "timeout": %s}`, event, ws.WebSocketToken, timeout)
+	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	if err != nil {
+		return fmt.Errorf("error writing message to auth client | %w", err)
+	}
+	return nil
+}
+
 // #endregion
 
 // #region *WebSocketManager helper methods (subscribe, readers, routers, and connections)
@@ -1031,6 +1166,22 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		if ws.OrderStatusCallback != nil {
 			ws.OrderStatusCallback(v)
 		}
+	case WSEditOrderResp:
+		if ws.OrderStatusCallback != nil {
+			ws.OrderStatusCallback(v)
+		}
+	case WSCancelOrderResp:
+		if ws.OrderStatusCallback != nil {
+			ws.OrderStatusCallback(v)
+		}
+	case WSCancelAllResp:
+		if ws.OrderStatusCallback != nil {
+			ws.OrderStatusCallback(v)
+		}
+	case WSCancelAllAfterResp:
+		if ws.OrderStatusCallback != nil {
+			ws.OrderStatusCallback(v)
+		}
 	}
 	return nil
 }
@@ -1079,6 +1230,12 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			return fmt.Errorf("error asserting msg.content to wspong type")
 		} else {
 			log.Println(pongMsg.Event, pongMsg.ReqID)
+		}
+	case "error":
+		if eventMsg, ok := msg.Content.(WSErrorResp); !ok {
+			return fmt.Errorf("error asserting msg.content to wserrorresp type")
+		} else {
+			return fmt.Errorf("error message: %s | reqid: %d", eventMsg.ErrorMessage, eventMsg.ReqID)
 		}
 	default:
 		return fmt.Errorf("cannot route unknown event type | %s", msg.Event)

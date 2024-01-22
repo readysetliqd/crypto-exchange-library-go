@@ -2084,4 +2084,78 @@ func WSValidateAddOrder() WSAddOrderOption {
 	}
 }
 
+type WSEditOrderOption func(buffer *bytes.Buffer)
+
+// Field "userref" is an optional user-specified integer id associated with
+// edit request.
+//
+// Note: userref from parent order will not be retained on the new order after
+// edit.
+func WSNewUserRef(userRef string) WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "newuserref": "%s"`, userRef))
+	}
+}
+
+// Updates order quantity in terms of the base asset.
+func WSNewVolume(volume string) WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "volume": "%s"`, volume))
+	}
+}
+
+// Updates limit price for "limit" orders. Updates trigger price for "stop-loss",
+// "stop-loss-limit", "take-profit", "take-profit-limit", "trailing-stop" and
+// "trailing-stop-limit" orders
+//
+// Relative Prices: Either price or price2 can (and sometimes must) be preceded
+// by +, -, or # to specify the order price as an offset relative to the last
+// traded price. + adds the amount to, and - subtracts the amount from the last
+// traded price. # will either add or subtract the amount to the last traded price,
+// depending on the direction and order type used. Prices can also be suffixed
+// with a % to signify the relative amount as a percentage, rather than an absolute
+// price difference.
+//
+// Trailing Stops: Required arg 'price' must use a relative price for this field,
+// namely the + prefix, from which the direction will be automatic based on if
+// the original order is a buy or sell (no need to use - or #). The % suffix
+// also works for these order types to use a relative percentage price.
+func WSNewPrice(price string) WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "price": "%s"`, price))
+	}
+}
+
+// Updates limit price for "stop-loss-limit", "take-profit-limit" and
+// "trailing-stop-limit" orders
+//
+// Trailing Stops Note: In practice, the system will accept either relative or
+// specific (without + or -) for arg 'price2' despite what the docs say. The
+// note is included here just in case; Kraken API docs: Must use a relative
+// price for this field, namely one of the + or - prefixes. This will provide
+// the offset from the trigger price to the limit price, i.e. +0 would set the
+// limit price equal to the trigger price. The % suffix also works for this
+// field to use a relative percentage limit price.
+func WSNewPrice2(price2 string) WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "price2": "%s"`, price2))
+	}
+}
+
+// Post-only order (available when ordertype = limit). All the flags from the
+// parent order are retained except post-only. Post-only needs to be explicitly
+// mentioned on every edit request.
+func WSNewPostOnly() WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "oflags": "post"`)
+	}
+}
+
+// Validate inputs only. Do not submit order. Defaults to false if not called.
+func WSValidateEditOrder() WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(`, "validate": "true"`)
+	}
+}
+
 // #endregion

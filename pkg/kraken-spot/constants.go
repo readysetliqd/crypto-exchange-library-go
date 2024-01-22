@@ -54,6 +54,7 @@ var generalMessageEvents = map[string]bool{
 	"systemStatus":       true,
 	"subscriptionStatus": true,
 	"pong":               true,
+	"error":              true,
 }
 
 // #endregion

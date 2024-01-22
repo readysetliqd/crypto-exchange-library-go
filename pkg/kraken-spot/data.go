@@ -873,8 +873,38 @@ func (gm *GenericMessage) UnmarshalJSON(data []byte) error {
 			return fmt.Errorf("error unmarshalling addorderstatus msg | %w", err)
 		}
 		gm.Content = msg
+	case "editOrderStatus":
+		var msg WSEditOrderResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling editorderstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "cancelOrderStatus":
+		var msg WSCancelOrderResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling cancelorderstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "cancelAllStatus":
+		var msg WSCancelAllResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling cancelorderstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "cancelAllOrdersAfterStatus":
+		var msg WSCancelAllAfterResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling cancelallordersafterstatus msg | %w", err)
+		}
+		gm.Content = msg
+	case "error":
+		var msg WSErrorResp
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("error unmarshalling error event | %w", err)
+		}
+		gm.Content = msg
 	default:
-		return fmt.Errorf("unknown event type | %s", gm.Event)
+		return fmt.Errorf("unknown event type | %s | %s", gm.Event, gm)
 	}
 	return nil
 }
@@ -939,6 +969,12 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("cannot unmarshal unknown channel name | %s", gm.ChannelName)
 	}
 	return nil
+}
+
+type WSErrorResp struct {
+	Event        string `json:"event"`
+	ErrorMessage string `json:"errorMessage"`
+	ReqID        int    `json:"reqid"`
 }
 
 type WSPong struct {
