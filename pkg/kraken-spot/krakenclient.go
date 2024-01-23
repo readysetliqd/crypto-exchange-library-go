@@ -1,6 +1,7 @@
 package krakenspot
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -46,14 +47,22 @@ type APIManager struct {
 
 // WebSocket API
 type WebSocketManager struct {
-	WebSocketClient      *websocket.Conn
-	AuthWebSocketClient  *websocket.Conn
-	WebSocketToken       string
-	SubscriptionMgr      *SubscriptionManager
-	OrderBookMgr         *OrderBookManager
-	SystemStatusCallback func(status string)
-	OrderStatusCallback  func(orderStatus interface{})
-	Mutex                sync.RWMutex
+	WebSocketClient         *websocket.Conn
+	WebSocketTimeout        *time.Ticker
+	WebSocketCtx            context.Context
+	WebSocketCancel         context.CancelFunc
+	WebSocketWriteMutex     sync.Mutex
+	AuthWebSocketClient     *websocket.Conn
+	AuthWebSocketTimeout    *time.Ticker
+	AuthWebSocketCtx        context.Context
+	AuthWebSocketCancel     context.CancelFunc
+	AuthWebSocketWriteMutex sync.Mutex
+	WebSocketToken          string
+	SubscriptionMgr         *SubscriptionManager
+	OrderBookMgr            *OrderBookManager
+	SystemStatusCallback    func(status string)
+	OrderStatusCallback     func(orderStatus interface{})
+	Mutex                   sync.RWMutex
 }
 
 type OrderBookManager struct {

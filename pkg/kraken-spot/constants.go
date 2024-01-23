@@ -19,6 +19,8 @@ const (
 
 var heartbeat = []byte{123, 34, 101, 118, 101, 110, 116, 34, 58, 34, 104, 101, 97, 114, 116, 98, 101, 97, 116, 34, 125}
 
+const timeoutDelay = 10
+
 var publicChannelNames = map[string]bool{
 	"ticker":     true,
 	"ohlc-1":     true,
@@ -95,4 +97,4 @@ var maxCounterMap = map[uint8]uint8{
 // Formatting for number of decimals for USD (ZUSD) asset on Kraken
 const usdDecimalsFormat = "%.4f"
 
-var ErrNotABookUpdateMsg = errors.New("not a book update message")
+var errNotABookUpdateMsg = errors.New("not a book update message")

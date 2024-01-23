@@ -2,6 +2,7 @@ package krakenspot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/shopspring/decimal"
@@ -127,6 +129,7 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 		reinitialize the client with a valid systemStatusCallback function
 		`)
 	}
+
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
 		// TODO implement retry, 403 error when system is under maintenance,
@@ -244,7 +247,9 @@ func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallbac
 func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
 	channelName := "ticker"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -297,7 +302,9 @@ func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback
 func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error {
 	channelName := "ohlc"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, channelName, interval)
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -322,6 +329,7 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error 
 func (ws *WebSocketManager) SubscribeTrade(pair string, callback GenericCallback) error {
 	channelName := "trade"
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	// ctx, cancel := ... here?
 	err := ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
@@ -338,7 +346,9 @@ func (ws *WebSocketManager) SubscribeTrade(pair string, callback GenericCallback
 func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
 	channelName := "trade"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -379,7 +389,9 @@ func (ws *WebSocketManager) SubscribeSpread(pair string, callback GenericCallbac
 func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 	channelName := "spread"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -498,7 +510,9 @@ func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback Ge
 func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16) error {
 	channelName := "book"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, channelName, depth)
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing message | %w", err)
 		return err
@@ -608,7 +622,9 @@ func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options
 func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
 	channelName := "ownTrades"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -658,7 +674,9 @@ func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, option
 func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
 	channelName := "openOrders"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -766,7 +784,9 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	}
 	event := "addOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "type": "%s", "volume": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, direction, volume, pair, buffer.String())
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -811,7 +831,9 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 	}
 	event := "editOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "orderid": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, orderID, pair, buffer.String())
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -827,7 +849,9 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
 	event := "cancelOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": ["%s"]}`, event, ws.WebSocketToken, orderID)
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -847,7 +871,9 @@ func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
 		return fmt.Errorf("error marshalling order ids to json | %w", err)
 	}
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": %s}`, event, ws.WebSocketToken, string(ordersJSON))
+	ws.AuthWebSocketWriteMutex.Lock()
 	err = ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -863,7 +889,9 @@ func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
 func (ws *WebSocketManager) WSCancelAllOrders() error {
 	event := "cancelAll"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s"}`, event, ws.WebSocketToken)
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -897,7 +925,9 @@ func (ws *WebSocketManager) WSCancelAllOrders() error {
 func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 	event := "cancelAllOrdersAfter"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "timeout": %s}`, event, ws.WebSocketToken, timeout)
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		return fmt.Errorf("error writing message to auth client | %w", err)
 	}
@@ -930,7 +960,9 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	ws.SubscriptionMgr.Mutex.Unlock()
 
 	// Build payload and send subscription message
+	ws.WebSocketWriteMutex.Lock()
 	err := ws.WebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.WebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing subscription message | %w", err)
 		return err
@@ -946,6 +978,15 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 					sub.Callback(data)
 				}
 			case <-sub.DoneChan:
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map
+					ws.SubscriptionMgr.Mutex.Lock()
+					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
+					ws.SubscriptionMgr.Mutex.Unlock()
+					return
+				}
+			case <-ws.WebSocketCtx.Done():
 				if sub.DoneChanClosed == 0 { // channel is open
 					sub.closeChannels()
 					// Delete subscription from map
@@ -980,7 +1021,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	ws.SubscriptionMgr.Mutex.Unlock()
 
 	// Build payload and send subscription message
+	ws.AuthWebSocketWriteMutex.Lock()
 	err := ws.AuthWebSocketClient.WriteMessage(websocket.TextMessage, []byte(payload))
+	ws.AuthWebSocketWriteMutex.Unlock()
 	if err != nil {
 		err = fmt.Errorf("error writing subscription message | %w", err)
 		return err
@@ -1004,6 +1047,15 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 					ws.SubscriptionMgr.Mutex.Unlock()
 					return
 				}
+			case <-ws.AuthWebSocketCtx.Done():
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map
+					ws.SubscriptionMgr.Mutex.Lock()
+					delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+					ws.SubscriptionMgr.Mutex.Unlock()
+					return
+				}
 			}
 		}
 	}()
@@ -1015,23 +1067,29 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 func (ws *WebSocketManager) startMessageReader() {
 	go func() {
 		for {
-			_, msg, err := ws.WebSocketClient.ReadMessage()
-			if err != nil {
-				log.Println("error reading message | ", err)
-				// TODO figure out reconnect logic, reconnect here? route error to somewhere else?
-				// TODO this error occurs if connect, subscribe, unsubscribe, subscribe, unsubscribe
-				// TODO from AUTHENTICATED. but somehow the private reader threw this error?
-				// if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
-				// }
-				continue
-			}
-			if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
-				err := ws.routeMessage(msg)
+			select {
+			case <-ws.WebSocketCtx.Done():
+				return
+			default:
+				_, msg, err := ws.WebSocketClient.ReadMessage()
 				if err != nil {
-					log.Println(err)
+					log.Println("error reading message | ", err)
+					// TODO figure out reconnect logic, reconnect here? route error to somewhere else?
+					// TODO this error occurs if connect, subscribe, unsubscribe, subscribe, unsubscribe
+					// TODO from AUTHENTICATED. but somehow the private reader threw this error?
+					// if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
+					// }
+					continue
 				}
-			} else { //DEBUG
-				continue
+				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
+					err := ws.routeMessage(msg)
+					if err != nil {
+						log.Println(err)
+					}
+				} else {
+					// reset timeout delay on heartbeat message
+					ws.WebSocketTimeout.Reset(time.Second * timeoutDelay)
+				}
 			}
 		}
 	}()
@@ -1042,18 +1100,24 @@ func (ws *WebSocketManager) startMessageReader() {
 func (ws *WebSocketManager) startAuthMessageReader() {
 	go func() {
 		for {
-			_, msg, err := ws.AuthWebSocketClient.ReadMessage()
-			if err != nil {
-				log.Println("error reading message | ", err)
-				continue
-			}
-			if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
-				err := ws.routeMessage(msg)
+			select {
+			case <-ws.AuthWebSocketCtx.Done():
+				return
+			default:
+				_, msg, err := ws.AuthWebSocketClient.ReadMessage()
 				if err != nil {
-					log.Println(err)
+					log.Println("error reading message | ", err)
+					continue
 				}
-			} else { //DEBUG
-				continue
+				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
+					err := ws.routeMessage(msg)
+					if err != nil {
+						log.Println(err)
+					}
+				} else {
+					// reset timeout delay on heartbeat message
+					ws.AuthWebSocketTimeout.Reset(time.Second * timeoutDelay)
+				}
 			}
 		}
 	}()
@@ -1276,8 +1340,8 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 func (ws *WebSocketManager) dialKraken(url string) error {
 	ws.Mutex.Lock()
 	defer ws.Mutex.Unlock()
-	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{})
 
+	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{})
 	if err != nil {
 		err = fmt.Errorf("error dialing kraken | %w", err)
 		return err
@@ -1285,8 +1349,28 @@ func (ws *WebSocketManager) dialKraken(url string) error {
 	switch url {
 	case wsPublicURL:
 		ws.WebSocketClient = conn
+		ws.WebSocketTimeout = time.NewTicker(time.Second * timeoutDelay)
+		ws.WebSocketCtx, ws.WebSocketCancel = context.WithCancel(context.Background())
+		go func() {
+			for range ws.WebSocketTimeout.C {
+				ws.WebSocketCancel()
+				ws.WebSocketClient.Close()
+				log.Println("attempting reconnect") // TODO implement a reconnect method and add here
+				ws.WebSocketTimeout.Stop()
+			}
+		}()
 	case wsPrivateURL:
 		ws.AuthWebSocketClient = conn
+		ws.AuthWebSocketTimeout = time.NewTicker(time.Second * timeoutDelay)
+		ws.AuthWebSocketCtx, ws.AuthWebSocketCancel = context.WithCancel(context.Background())
+		go func() {
+			for range ws.AuthWebSocketTimeout.C {
+				ws.AuthWebSocketCancel()
+				ws.AuthWebSocketClient.Close()
+				log.Println("attempting reconnect") // TODO implement a reconnect method and add here
+				ws.AuthWebSocketTimeout.Stop()
+			}
+		}()
 	}
 	return nil
 }
@@ -1443,21 +1527,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 								}
 							}
 						case <-ob.DoneChan:
-							if ob.DoneChanClosed == 0 {
-								ob.closeChannels()
-								// Delete subscription from book
-								ws.OrderBookMgr.Mutex.Lock()
-								if ws.OrderBookMgr.OrderBooks != nil {
-									if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; ok {
-										delete(ws.OrderBookMgr.OrderBooks[channelName], pair)
-									} else {
-										log.Printf("UnsubscribeBook error | channel name %s does not exist in OrderBooks", channelName)
-									}
-								} else {
-									log.Println("UnsubscribeBook error | OrderBooks is nil")
-								}
-								ws.OrderBookMgr.Mutex.Unlock()
-							}
+							ws.closeAndDeleteBook(ob, pair, channelName)
+							return
+						case <-ws.WebSocketCtx.Done():
+							ws.closeAndDeleteBook(ob, pair, channelName)
 							return
 						}
 					}
@@ -1466,6 +1539,26 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 				log.Println("unknown data type sent to book callback")
 			}
 		}
+	}
+}
+
+// Helper method that closes channels for InternalOrderBook and deletes its
+// entries from the internal order book
+func (ws *WebSocketManager) closeAndDeleteBook(ob *InternalOrderBook, pair, channelName string) {
+	if ob.DoneChanClosed == 0 {
+		ob.closeChannels()
+		// Delete subscription from book
+		ws.OrderBookMgr.Mutex.Lock()
+		if ws.OrderBookMgr.OrderBooks != nil {
+			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; ok {
+				delete(ws.OrderBookMgr.OrderBooks[channelName], pair)
+			} else {
+				log.Printf("UnsubscribeBook error | channel name %s does not exist in OrderBooks", channelName)
+			}
+		} else {
+			log.Println("UnsubscribeBook error | OrderBooks is nil")
+		}
+		ws.OrderBookMgr.Mutex.Unlock()
 	}
 }
 

@@ -951,7 +951,7 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 	case strings.HasPrefix(gm.ChannelName, "book"):
 		var content WSBookUpdateResp
 		if err := json.Unmarshal(data, &content); err != nil {
-			if errors.Is(err, ErrNotABookUpdateMsg) {
+			if errors.Is(err, errNotABookUpdateMsg) {
 				// not an update, try snapshot
 				var snapshotContent WSBookSnapshotResp
 				if err := json.Unmarshal(data, &snapshotContent); err != nil {
@@ -1417,7 +1417,7 @@ func (bu *WSBookUpdateResp) UnmarshalJSON(data []byte) error {
 			bu.Bids = aux.Bids
 			bu.Checksum = aux.Checksum
 		} else if aux.Snapshot != nil {
-			return ErrNotABookUpdateMsg
+			return errNotABookUpdateMsg
 		}
 		// unmarshal remaining elements
 		if err := json.Unmarshal(raw[0], &bu.ChannelID); err != nil {
