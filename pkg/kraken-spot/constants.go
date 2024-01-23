@@ -1,5 +1,7 @@
 package krakenspot
 
+import "errors"
+
 // URL constants
 const (
 	baseUrl       = "https://api.kraken.com"
@@ -92,3 +94,5 @@ var maxCounterMap = map[uint8]uint8{
 
 // Formatting for number of decimals for USD (ZUSD) asset on Kraken
 const usdDecimalsFormat = "%.4f"
+
+var ErrNotABookUpdateMsg = errors.New("not a book update message")

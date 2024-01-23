@@ -438,13 +438,13 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 //		Bids []Level
 //	}
 //	var book Book
-//	func initialStateMsg(msg krakenspot.WSOrderBook) bool {
+//	func initialStateMsg(msg krakenspot.WSOrderBookSnapshot) bool {
 //		//...your implementation here
 //	}
-//	func initializeBook(msg krakenspot.WSOrderBook, book *Book) {
+//	func initializeBook(msg krakenspot.WSOrderBookSnapshot, book *Book) {
 //		//...your implementation here
 //	}
-//	func updateBook(msg krakenspot.WSOrderBook, book *Book) {
+//	func updateBook(msg krakenspot.WSOrderBookUpdate, book *Book) {
 //		//...your implementation here
 //	}
 //	// call functions for building and updating book as messages are received
@@ -1030,6 +1030,8 @@ func (ws *WebSocketManager) startMessageReader() {
 				if err != nil {
 					log.Println(err)
 				}
+			} else { //DEBUG
+				continue
 			}
 		}
 	}()
@@ -1050,6 +1052,8 @@ func (ws *WebSocketManager) startAuthMessageReader() {
 				if err != nil {
 					log.Println(err)
 				}
+			} else { //DEBUG
+				continue
 			}
 		}
 	}()
@@ -1127,7 +1131,12 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
-	case WSBookResp:
+	case WSBookUpdateResp:
+		// send to channel if open
+		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+		}
+	case WSBookSnapshotResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
@@ -1326,7 +1335,10 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 
 func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16) func(data interface{}) {
 	return func(data interface{}) {
-		if msg, ok := data.(WSBookResp); ok {
+		if msg, ok := data.(WSBookUpdateResp); ok { // data is book update message
+			ws.OrderBookMgr.OrderBooks[channelName][pair].DataChan <- msg
+		} else if msg, ok := data.(WSBookSnapshotResp); ok { // data is book snapshot
+			// make book-depth map if not exists
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; !ok {
 				ws.OrderBookMgr.Mutex.Lock()
 				ws.OrderBookMgr.OrderBooks[channelName] = make(map[string]*InternalOrderBook)
@@ -1335,7 +1347,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName][pair]; !ok {
 				ws.OrderBookMgr.Mutex.Lock()
 				ws.OrderBookMgr.OrderBooks[channelName][pair] = &InternalOrderBook{
-					DataChan:       make(chan WSOrderBook),
+					DataChan:       make(chan WSBookUpdateResp),
 					DoneChan:       make(chan struct{}),
 					DataChanClosed: 0,
 					DoneChanClosed: 0,
@@ -1451,7 +1463,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 					}
 				}()
 			} else {
-				ws.OrderBookMgr.OrderBooks[channelName][pair].DataChan <- msg.OrderBook
+				log.Println("unknown data type sent to book callback")
 			}
 		}
 	}
@@ -1580,7 +1592,7 @@ func (ob *InternalOrderBook) closeChannels() {
 
 // Builds initial state of book from first message (arg 'msg') after subscribing
 // to new book channel.
-func (ob *InternalOrderBook) buildInitialBook(msg *WSOrderBook) error {
+func (ob *InternalOrderBook) buildInitialBook(msg *WSOrderBookSnapshot) error {
 	ob.Mutex.Lock()
 	defer ob.Mutex.Unlock()
 	capacity := len(msg.Bids)

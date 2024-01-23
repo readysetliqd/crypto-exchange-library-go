@@ -2,6 +2,7 @@ package krakenspot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -948,9 +949,20 @@ func (gm *GenericArrayMessage) UnmarshalJSON(data []byte) error {
 		}
 		gm.Content = content
 	case strings.HasPrefix(gm.ChannelName, "book"):
-		var content WSBookResp
+		var content WSBookUpdateResp
 		if err := json.Unmarshal(data, &content); err != nil {
-			return fmt.Errorf("error unmarshalling json to wsbookresp type | %w", err)
+			if errors.Is(err, ErrNotABookUpdateMsg) {
+				// not an update, try snapshot
+				var snapshotContent WSBookSnapshotResp
+				if err := json.Unmarshal(data, &snapshotContent); err != nil {
+					return fmt.Errorf("error unmarshalling json to snapshot and update types | %w | %v", err, raw)
+				} else {
+					gm.Content = snapshotContent
+					return nil
+				}
+			} else { // error unmarshalling not due to wrong type
+				return fmt.Errorf("error unmarshalling json to wsbookupdateresp type | %w | %v", err, raw)
+			}
 		}
 		gm.Content = content
 	case gm.ChannelName == "ownTrades":
@@ -1368,67 +1380,86 @@ func (s *WSSpread) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type WSBookResp struct {
-	ChannelID   int `json:"channelID"`
-	OrderBook   WSOrderBook
-	ChannelName string `json:"channelName"`
-	Pair        string `json:"pair"`
+type WSBookUpdateResp struct {
+	ChannelID   int
+	Asks        []WSBookEntry
+	Bids        []WSBookEntry
+	Checksum    string
+	ChannelName string
+	Pair        string
 }
 
-func (s *WSBookResp) UnmarshalJSON(data []byte) error {
+func (bu *WSBookUpdateResp) UnmarshalJSON(data []byte) error {
 	var raw []json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return fmt.Errorf("error unmarshalling to raw | %w", err)
 	}
-	if len(raw) != 4 {
-		return fmt.Errorf("unexpected data length encountered")
-	}
-	if err := json.Unmarshal(raw[0], &s.ChannelID); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(raw[1], &s.OrderBook); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(raw[2], &s.ChannelName); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(raw[3], &s.Pair); err != nil {
-		return err
+	switch len(raw) {
+	case 4: // raw[1] could be ask update "a" bid update "b" or snapshot "as"
+		// determine what type of message it is, return if snapshot type
+		type Alias WSBookUpdateResp
+		aux := struct {
+			Asks     []WSBookEntry `json:"a"`
+			Bids     []WSBookEntry `json:"b"`
+			Checksum string        `json:"c"`
+			Snapshot []WSBookEntry `json:"as"`
+			*Alias
+		}{
+			Alias: (*Alias)(bu),
+		}
+		if err := json.Unmarshal(raw[1], &aux); err != nil {
+			return fmt.Errorf("error unmarshalling to aux | %w", err)
+		}
+		if aux.Asks != nil {
+			bu.Asks = aux.Asks
+			bu.Checksum = aux.Checksum
+		} else if aux.Bids != nil {
+			bu.Bids = aux.Bids
+			bu.Checksum = aux.Checksum
+		} else if aux.Snapshot != nil {
+			return ErrNotABookUpdateMsg
+		}
+		// unmarshal remaining elements
+		if err := json.Unmarshal(raw[0], &bu.ChannelID); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelid")
+		}
+		if err := json.Unmarshal(raw[2], &bu.ChannelName); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelname")
+		}
+		if err := json.Unmarshal(raw[3], &bu.Pair); err != nil {
+			return fmt.Errorf("error unmarshalling raw to pair")
+		}
+	case 5: // only update msgs can be 5 length. assumes asks always listed first
+		if err := json.Unmarshal(raw[0], &bu.ChannelID); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelid")
+		}
+		var ob WSOrderBook
+		if err := json.Unmarshal(raw[1], &ob); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelid")
+		}
+
+		if err := json.Unmarshal(raw[2], &ob); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelid")
+		}
+		bu.Asks = ob.Asks
+		bu.Bids = ob.Bids
+		bu.Checksum = ob.Checksum
+		if err := json.Unmarshal(raw[3], &bu.ChannelName); err != nil {
+			return fmt.Errorf("error unmarshalling raw to channelname")
+		}
+		if err := json.Unmarshal(raw[4], &bu.Pair); err != nil {
+			return fmt.Errorf("error unmarshalling raw to pair")
+		}
+	default:
+		return fmt.Errorf("unknown data length encountered")
 	}
 	return nil
 }
 
 type WSOrderBook struct {
-	Asks     []WSBookEntry
-	Bids     []WSBookEntry
-	Checksum string `json:"c"`
-}
-
-func (ob *WSOrderBook) UnmarshalJSON(data []byte) error {
-	type Alias WSOrderBook
-	aux := &struct {
-		AsksA  []WSBookEntry `json:"a"`
-		AsksAS []WSBookEntry `json:"as"`
-		BidsB  []WSBookEntry `json:"b"`
-		BidsBS []WSBookEntry `json:"bs"`
-		*Alias
-	}{
-		Alias: (*Alias)(ob),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	if aux.AsksA != nil {
-		ob.Asks = aux.AsksA
-	} else if aux.AsksAS != nil {
-		ob.Asks = aux.AsksAS
-	}
-	if aux.BidsB != nil {
-		ob.Bids = aux.BidsB
-	} else if aux.BidsBS != nil {
-		ob.Bids = aux.BidsBS
-	}
-	return nil
+	Asks     []WSBookEntry `json:"a"`
+	Bids     []WSBookEntry `json:"b"`
+	Checksum string        `json:"c"`
 }
 
 type WSBookEntry struct {
@@ -1471,6 +1502,41 @@ func (s *WSBookEntry) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unexpected data length encountered")
 	}
 	return nil
+}
+
+type WSBookSnapshotResp struct {
+	ChannelID   int `json:"channelID"`
+	OrderBook   WSOrderBookSnapshot
+	ChannelName string `json:"channelName"`
+	Pair        string `json:"pair"`
+}
+
+func (s *WSBookSnapshotResp) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("error unmarshalling to raw | %w", err)
+	}
+	if len(raw) != 4 {
+		return fmt.Errorf("unexpected data length encountered")
+	}
+	if err := json.Unmarshal(raw[0], &s.ChannelID); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[1], &s.OrderBook); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[2], &s.ChannelName); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw[3], &s.Pair); err != nil {
+		return err
+	}
+	return nil
+}
+
+type WSOrderBookSnapshot struct {
+	Asks []WSBookEntry `json:"as"`
+	Bids []WSBookEntry `json:"bs"`
 }
 
 // #endregion
@@ -1604,7 +1670,7 @@ type WSOrderDescription struct {
 type InternalOrderBook struct {
 	Asks           []InternalBookEntry
 	Bids           []InternalBookEntry
-	DataChan       chan WSOrderBook
+	DataChan       chan WSBookUpdateResp
 	DoneChan       chan struct{}
 	DataChanClosed int32
 	DoneChanClosed int32
