@@ -47,20 +47,14 @@ type APIManager struct {
 
 // WebSocket API
 type WebSocketManager struct {
-	WebSocketClient         *websocket.Conn
-	WebSocketCtx            context.Context
-	WebSocketCancel         context.CancelFunc
-	WebSocketWriteMutex     sync.Mutex
-	AuthWebSocketClient     *websocket.Conn
-	AuthWebSocketCtx        context.Context
-	AuthWebSocketCancel     context.CancelFunc
-	AuthWebSocketWriteMutex sync.Mutex
-	WebSocketToken          string
-	SubscriptionMgr         *SubscriptionManager
-	OrderBookMgr            *OrderBookManager
-	SystemStatusCallback    func(status string)
-	OrderStatusCallback     func(orderStatus interface{})
-	Mutex                   sync.RWMutex
+	WebSocketClient      *WebSocketClient
+	AuthWebSocketClient  *WebSocketClient
+	WebSocketToken       string
+	SubscriptionMgr      *SubscriptionManager
+	OrderBookMgr         *OrderBookManager
+	SystemStatusCallback func(status string)
+	OrderStatusCallback  func(orderStatus interface{})
+	Mutex                sync.RWMutex
 }
 
 type WebSocketClient struct {
