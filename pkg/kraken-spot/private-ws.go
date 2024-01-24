@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"log"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -1073,13 +1074,26 @@ func (ws *WebSocketManager) startMessageReader() {
 			default:
 				_, msg, err := ws.WebSocketClient.ReadMessage()
 				if err != nil {
-					log.Println("error reading message | ", err)
-					// TODO figure out reconnect logic, reconnect here? route error to somewhere else?
-					// TODO this error occurs if connect, subscribe, unsubscribe, subscribe, unsubscribe
-					// TODO from AUTHENTICATED. but somehow the private reader threw this error?
-					// if strings.Contains(err.Error(), "close 1006") { // abnormal closure: unexpected EOF
-					// }
-					continue
+					if err != nil {
+						if err, ok := err.(net.Error); ok && err.Timeout() {
+							log.Println("websocket connection timed out, attempting reconnect")
+							ws.WebSocketCancel()
+							ws.WebSocketClient.Close()
+							ws.reconnect(wsPublicURL)
+						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
+							log.Println("unexpected websocket closure, attempting reconnect")
+							ws.WebSocketCancel()
+							ws.WebSocketClient.Close()
+							ws.reconnect(wsPublicURL)
+						} else if strings.Contains(err.Error(), "wsarecv") {
+							log.Println("internet connection lost, attempting reconnect")
+							ws.WebSocketCancel()
+							ws.WebSocketClient.Close()
+							ws.reconnect(wsPublicURL)
+						}
+						log.Println("error reading message | ", err)
+						continue
+					}
 				}
 				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
 					err := ws.routeMessage(msg)
@@ -1088,7 +1102,7 @@ func (ws *WebSocketManager) startMessageReader() {
 					}
 				} else {
 					// reset timeout delay on heartbeat message
-					ws.WebSocketTimeout.Reset(time.Second * timeoutDelay)
+					ws.WebSocketClient.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
 				}
 			}
 		}
@@ -1106,6 +1120,21 @@ func (ws *WebSocketManager) startAuthMessageReader() {
 			default:
 				_, msg, err := ws.AuthWebSocketClient.ReadMessage()
 				if err != nil {
+					if err, ok := err.(net.Error); ok && err.Timeout() {
+						ws.AuthWebSocketCancel()
+						ws.AuthWebSocketClient.Close()
+						ws.reconnect(wsPrivateURL)
+					} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
+						log.Println("unexpected websocket closure, attempting reconnect")
+						ws.AuthWebSocketCancel()
+						ws.AuthWebSocketClient.Close()
+						ws.reconnect(wsPrivateURL)
+					} else if strings.Contains(err.Error(), "wsarecv") {
+						log.Println("internet connection lost, attempting reconnect")
+						ws.AuthWebSocketCancel()
+						ws.AuthWebSocketClient.Close()
+						ws.reconnect(wsPrivateURL)
+					}
 					log.Println("error reading message | ", err)
 					continue
 				}
@@ -1116,7 +1145,7 @@ func (ws *WebSocketManager) startAuthMessageReader() {
 					}
 				} else {
 					// reset timeout delay on heartbeat message
-					ws.AuthWebSocketTimeout.Reset(time.Second * timeoutDelay)
+					ws.AuthWebSocketClient.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
 				}
 			}
 		}
@@ -1325,17 +1354,32 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 // 	}
 // }
 
-// // TODO implement reconnection logic recursive?
-// func (kc *KrakenClient) reconnect() error {
-// 	kc.WebSocketMutex.Lock()
-// 	kc.WebSocketClient = nil
-// 	kc.WebSocketMutex.Unlock()
-// 	err := kc.dialKraken()
-// 	if err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
+// Attempts reconnect with dialKraken() method. Retries 5 times instantly then
+// scales back to attempt reconnect once every ~8 seconds.
+func (ws *WebSocketManager) reconnect(url string) error {
+	go func() {
+		t := 1.0
+		count := 0
+		for {
+			err := ws.dialKraken(url)
+			if err != nil {
+				log.Printf("encountered error on reconnecting, trying again | %s", err)
+			} else {
+				log.Println("reconnect successful")
+				return
+			}
+			// attempt reconnect instantly 5 times then backoff to every 8 seconds
+			if count < 6 {
+				continue
+			}
+			if t < 8 {
+				t = t * 1.3
+			}
+			time.Sleep(time.Duration(t) * time.Second)
+		}
+	}()
+	return nil
+}
 
 func (ws *WebSocketManager) dialKraken(url string) error {
 	ws.Mutex.Lock()
@@ -1349,28 +1393,14 @@ func (ws *WebSocketManager) dialKraken(url string) error {
 	switch url {
 	case wsPublicURL:
 		ws.WebSocketClient = conn
-		ws.WebSocketTimeout = time.NewTicker(time.Second * timeoutDelay)
 		ws.WebSocketCtx, ws.WebSocketCancel = context.WithCancel(context.Background())
-		go func() {
-			for range ws.WebSocketTimeout.C {
-				ws.WebSocketCancel()
-				ws.WebSocketClient.Close()
-				log.Println("attempting reconnect") // TODO implement a reconnect method and add here
-				ws.WebSocketTimeout.Stop()
-			}
-		}()
+		// initialize read deadline to prevent blocking
+		ws.WebSocketClient.SetReadDeadline(time.Now().Add(timeoutDelay * time.Second))
 	case wsPrivateURL:
 		ws.AuthWebSocketClient = conn
-		ws.AuthWebSocketTimeout = time.NewTicker(time.Second * timeoutDelay)
 		ws.AuthWebSocketCtx, ws.AuthWebSocketCancel = context.WithCancel(context.Background())
-		go func() {
-			for range ws.AuthWebSocketTimeout.C {
-				ws.AuthWebSocketCancel()
-				ws.AuthWebSocketClient.Close()
-				log.Println("attempting reconnect") // TODO implement a reconnect method and add here
-				ws.AuthWebSocketTimeout.Stop()
-			}
-		}()
+		// initialize read deadline to prevent blocking
+		ws.AuthWebSocketClient.SetReadDeadline(time.Now().Add(timeoutDelay * time.Second))
 	}
 	return nil
 }

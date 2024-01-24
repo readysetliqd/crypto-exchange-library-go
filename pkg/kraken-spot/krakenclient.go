@@ -48,12 +48,10 @@ type APIManager struct {
 // WebSocket API
 type WebSocketManager struct {
 	WebSocketClient         *websocket.Conn
-	WebSocketTimeout        *time.Ticker
 	WebSocketCtx            context.Context
 	WebSocketCancel         context.CancelFunc
 	WebSocketWriteMutex     sync.Mutex
 	AuthWebSocketClient     *websocket.Conn
-	AuthWebSocketTimeout    *time.Ticker
 	AuthWebSocketCtx        context.Context
 	AuthWebSocketCancel     context.CancelFunc
 	AuthWebSocketWriteMutex sync.Mutex
@@ -65,11 +63,20 @@ type WebSocketManager struct {
 	Mutex                   sync.RWMutex
 }
 
+type WebSocketClient struct {
+	Conn   *websocket.Conn
+	Ctx    context.Context
+	Cancel context.CancelFunc
+	Mutex  sync.Mutex
+}
+
+// Internal order book management
 type OrderBookManager struct {
 	OrderBooks map[string]map[string]*InternalOrderBook
 	Mutex      sync.RWMutex
 }
 
+// Keeps track of all open subscriptions
 type SubscriptionManager struct {
 	PublicSubscriptions  map[string]map[string]*Subscription
 	PrivateSubscriptions map[string]*Subscription
