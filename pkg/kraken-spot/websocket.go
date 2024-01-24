@@ -20,7 +20,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO move all the public methods to its own file or rename this one
 // TODO add order response callback initializer method and add callback to ws manager struct
 // TODO add optional reqid to ALL websocket requests
 // TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
