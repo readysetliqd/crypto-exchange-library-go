@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -58,15 +59,22 @@ type WebSocketManager struct {
 }
 
 type WebSocketClient struct {
-	Conn   *websocket.Conn
-	Ctx    context.Context
-	Cancel context.CancelFunc
-	Mutex  sync.Mutex
-	Router MessageRouter
+	Conn           *websocket.Conn
+	Ctx            context.Context
+	Cancel         context.CancelFunc
+	Mutex          sync.Mutex
+	Router         MessageRouter
+	Authenticator  Authenticator
+	IsReconnecting atomic.Bool
 }
 
 type MessageRouter interface {
 	routeMessage(msg []byte) error
+}
+
+type Authenticator interface {
+	AuthenticateWebSockets() error
+	reauthenticate()
 }
 
 // Internal order book management

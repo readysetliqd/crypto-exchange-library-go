@@ -3871,18 +3871,22 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 
 	req, err := http.NewRequest("POST", baseUrl+urlPath, strings.NewReader(values.Encode()))
 	if err != nil {
-		if strings.Contains(err.Error(), "lookup") && strings.Contains(err.Error(), "no such host") {
-			return nil, fmt.Errorf("%w | %w", errNoInternetConnection, err)
-		} else if strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "forbidden") {
-			return nil, fmt.Errorf("%w | %w", err403Forbidden, err)
-		}
 		return nil, fmt.Errorf("error calling http.NewRequest() | %w", err)
 	}
 	req.Header.Add("API-Key", kc.APIKey)
 	req.Header.Add("API-Sign", signature)
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	return kc.Client.Do(req)
+	httpResp, err := kc.Client.Do(req)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such host") && strings.Contains(err.Error(), "lookup") {
+			return nil, fmt.Errorf("%w | %w", errNoInternetConnection, err)
+		} else if strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "forbidden") {
+			return nil, fmt.Errorf("%w | %w", err403Forbidden, err)
+		} else {
+			return nil, fmt.Errorf("unknown http.Client.Do() error | %w", err)
+		}
+	}
+	return httpResp, nil
 }
 
 // If HandleRateLimit is true, checks rate limit increment won't exceed max

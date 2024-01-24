@@ -20,8 +20,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO write a connect public only method
-// TODO write a connect private only method
 // TODO move all the public methods to its own file or rename this one
 // TODO add order response callback initializer method and add callback to ws manager struct
 // TODO add optional reqid to ALL websocket requests
@@ -31,18 +29,24 @@ import (
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO add trades logger and initializer to write trades to file
 // TODO test if callbacks can be nil and end user can access channels with go routines
+// TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
-// TODO update docstrings after connect public and private only methods are written
 // Creates both authenticated and public connections to Kraken WebSocket server.
-// Use ConnectPublic() instead if private channels aren't needed. Accepts arg
-// 'systemStatusCallback' callback function which an end user can implement
-// their own logic on handling incoming system status change messages.
+// Use ConnectPublic() or ConnectPrivate() instead if only channel type is needed.
+// Accepts arg 'systemStatusCallback' callback function which an end user can
+// implement their own logic on handling incoming system status change messages.
 //
 // Note: Creates authenticated token with AuthenticateWebSockets() method which
 // expires within 15 minutes. Strongly recommended to subscribe to at least one
 // private WebSocket channel and leave it open.
+//
+// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
+// crashes or invalid messages being pushed to Kraken's server on the occasions
+// where their system's status is changed. Ensure you have implemented handling
+// system status changes on your own or reinitialize the client with a valid
+// systemStatusCallback function
 //
 // # Enum (possible incoming status message values):
 //
@@ -122,42 +126,107 @@ import (
 //	// block program from exiting
 //	select{}
 func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error {
-	if systemStatusCallback == nil {
-		log.Println(`
-		WARNING: Passing nil to arg 'systemStatusCallback' may 
-		result in program crashes or invalid messages being pushed to Kraken's 
-		server on the occasions where their system's status is changed. Ensure 
-		you have implemented handling system status changes on your own or 
-		reinitialize the client with a valid systemStatusCallback function
-		`)
+	err := kc.connectPublic()
+	if err != nil {
+		return err
 	}
+	err = kc.connectPrivate()
+	if err != nil {
+		return err
+	}
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
+	return nil
+}
 
+// Connects to the public WebSocket endpoints of the Kraken API and initializes
+// WebSocketClient. Calls the unexported helper method connectPrivate to establish
+// the connection. If the connection is successful, it sets the SystemStatusCallback
+// function. It returns an error if the connection fails.
+//
+// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
+// crashes or invalid messages being pushed to Kraken's server on the occasions
+// where their system's status is changed. Ensure you have implemented handling
+// system status changes on your own or reinitialize the client with a valid
+// systemStatusCallback function
+//
+// See docstrings for (kc *KrakenClient) Connect() for example usage
+func (kc *KrakenClient) ConnectPublic(systemStatusCallback func(status string)) error {
+	err := kc.connectPublic()
+	if err != nil {
+		return err
+	}
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
+	return nil
+}
+
+// Helper method that initializes WebSocketClient for public endpoints by
+// dialing Kraken's server and starting its message reader.
+func (kc *KrakenClient) connectPublic() error {
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}}
+	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
+	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
+	if err != nil {
+		return fmt.Errorf("error dialing kraken public url | %w", err)
+	}
+	kc.WebSocketManager.WebSocketClient.startMessageReader(wsPublicURL)
+	return nil
+}
+
+// Connects to the private WebSocket endpoints of the Kraken API and initializes
+// WebSocketClient. Calls the unexported helper method connectPrivate to establish
+// the connection. If the connection is successful, it sets the SystemStatusCallback
+// function. It returns an error if the connection fails.
+//
+// Note: Creates authenticated token with AuthenticateWebSockets() method which
+// expires within 15 minutes. Strongly recommended to subscribe to at least one
+// private WebSocket channel and leave it open.
+//
+// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
+// crashes or invalid messages being pushed to Kraken's server on the occasions
+// where their system's status is changed. Ensure you have implemented handling
+// system status changes on your own or reinitialize the client with a valid
+// systemStatusCallback function
+//
+// See docstrings for (kc *KrakenClient) Connect() for example usage
+func (kc *KrakenClient) ConnectPrivate(systemStatusCallback func(status string)) error {
+	err := kc.connectPrivate()
+	if err != nil {
+		return err
+	}
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
+	return nil
+}
+
+// Helper method that initializes WebSocketClient for private endpoints by
+// getting an authenticated WebSocket token, dialing Kraken's server and starting
+// its message reader. Starts a loop to attempt reauthentication if an error is
+// encountered during those operations.
+func (kc *KrakenClient) connectPrivate() error {
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
 		if errors.Is(err, errNoInternetConnection) {
 			log.Printf("encountered error; attempting reauth | %s", err.Error())
-			// TODO implement reauth
+			kc.reauthenticate()
 		} else if errors.Is(err, err403Forbidden) {
 			log.Printf("encountered error; attempting reauth | %s", err.Error())
-			// TODO implement reauth
+			kc.reauthenticate()
+		} else {
+			log.Printf("unknown error encountered while authenticating WebSockets | %s", err.Error())
 		}
-		return fmt.Errorf("error authenticating websockets | %w", err)
 	}
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager}
-	err = kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
-	if err != nil {
-		return fmt.Errorf("error dialing kraken public url | %w", err)
-	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager}
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}}
+	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
 	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
 	if err != nil {
 		return fmt.Errorf("error dialing kraken private url | %w", err)
 	}
-	kc.WebSocketManager.WebSocketClient.startMessageReader()
-	kc.WebSocketManager.AuthWebSocketClient.startMessageReader()
-	kc.WebSocketManager.Mutex.Lock()
-	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
-	kc.WebSocketManager.Mutex.Unlock()
+	kc.WebSocketManager.AuthWebSocketClient.startMessageReader(wsPrivateURL)
 	return nil
 }
 
@@ -256,12 +325,14 @@ func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
 	channelName := "ticker"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -311,12 +382,14 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error 
 	channelName := "ohlc"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, channelName, interval)
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -355,12 +428,14 @@ func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
 	channelName := "trade"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -398,12 +473,14 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 	channelName := "spread"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -519,12 +596,14 @@ func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16) error {
 	channelName := "book"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, channelName, depth)
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -631,11 +710,13 @@ func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
 	channelName := "ownTrades"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -683,11 +764,13 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
 	channelName := "openOrders"
 	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -793,11 +876,13 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	event := "addOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "type": "%s", "volume": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, direction, volume, pair, buffer.String())
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -840,11 +925,13 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 	event := "editOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "orderid": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, orderID, pair, buffer.String())
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -858,11 +945,13 @@ func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
 	event := "cancelOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": ["%s"]}`, event, ws.WebSocketToken, orderID)
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -880,11 +969,13 @@ func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
 	}
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": %s}`, event, ws.WebSocketToken, string(ordersJSON))
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err = ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err = ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -898,11 +989,13 @@ func (ws *WebSocketManager) WSCancelAllOrders() error {
 	event := "cancelAll"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s"}`, event, ws.WebSocketToken)
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -934,11 +1027,13 @@ func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 	event := "cancelAllOrdersAfter"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "timeout": %s}`, event, ws.WebSocketToken, timeout)
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		return fmt.Errorf("error writing message to auth client | %w", err)
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 	return nil
 }
 
@@ -969,12 +1064,14 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 
 	// Build payload and send subscription message
 	ws.WebSocketClient.Mutex.Lock()
-	err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.WebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing subscription message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing subscription message | %w", err)
+			return err
+		}
 	}
+	ws.WebSocketClient.Mutex.Unlock()
 
 	// Start go routine listen for incoming data and call callback functions
 	go func() {
@@ -1030,12 +1127,14 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 
 	// Build payload and send subscription message
 	ws.AuthWebSocketClient.Mutex.Lock()
-	err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	if err != nil {
-		err = fmt.Errorf("error writing subscription message | %w", err)
-		return err
+	if ws.WebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			err = fmt.Errorf("error writing subscription message | %w", err)
+			return err
+		}
 	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
 
 	// Start go routine listen for incoming data and call callback functions
 	go func() {
@@ -1070,11 +1169,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	return nil
 }
 
-// TODO combine with auth message reader and change method to attach *WebSocketClient type
-// TODO when do that change calls to this method in dialKraken()
 // Starts a goroutine that continuously reads messages from the WebSocket
 // connection. If the message is not a heartbeat message, it routes the message.
-func (c *WebSocketClient) startMessageReader() {
+func (c *WebSocketClient) startMessageReader(url string) {
 	go func() {
 		for {
 			select {
@@ -1088,19 +1185,25 @@ func (c *WebSocketClient) startMessageReader() {
 							log.Println("websocket connection timed out, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
-							c.reconnect(wsPublicURL)
+							if c.IsReconnecting.CompareAndSwap(false, true) {
+								c.reconnect(url)
+							}
 							return
 						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
 							log.Println("unexpected websocket closure, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
-							c.reconnect(wsPublicURL)
+							if c.IsReconnecting.CompareAndSwap(false, true) {
+								c.reconnect(url)
+							}
 							return
 						} else if strings.Contains(err.Error(), "wsarecv") {
 							log.Println("internet connection lost, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
-							c.reconnect(wsPublicURL)
+							if c.IsReconnecting.CompareAndSwap(false, true) {
+								c.reconnect(url)
+							}
 							return
 						}
 						log.Println("error reading message | ", err)
@@ -1313,6 +1416,7 @@ func (c *WebSocketClient) reconnect(url string) error {
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
 			if count < 6 {
+				count++
 				continue
 			}
 			if t < 8 {
@@ -1321,14 +1425,52 @@ func (c *WebSocketClient) reconnect(url string) error {
 			time.Sleep(time.Duration(t) * time.Second)
 		}
 	}()
-	c.startMessageReader()
+	c.IsReconnecting.Store(false)
+	// Reauthenticate WebSocket token if Private
+	if url == wsPrivateURL {
+		err := c.Authenticator.AuthenticateWebSockets()
+		if err != nil {
+			if errors.Is(err, errNoInternetConnection) {
+				log.Printf("encountered error; attempting reauth | %s", err.Error())
+				c.Authenticator.reauthenticate()
+			} else if errors.Is(err, err403Forbidden) {
+				log.Printf("encountered error; attempting reauth | %s", err.Error())
+				c.Authenticator.reauthenticate()
+			}
+			return fmt.Errorf("error authenticating websockets | %w", err)
+		}
+	}
+	c.startMessageReader(url)
 	return nil
+}
+
+func (kc *KrakenClient) reauthenticate() {
+	go func() {
+		t := 1.0
+		count := 0
+		for {
+			err := kc.AuthenticateWebSockets()
+			if err != nil {
+				log.Printf("encountered error on reauthenticating, trying again | %s", err)
+			} else {
+				log.Println("reconnect successful")
+				return
+			}
+			// attempt reconnect instantly 5 times then backoff to every 8 seconds
+			if count < 6 {
+				continue
+			}
+			if t < 8 {
+				t = t * 1.3
+			}
+			time.Sleep(time.Duration(t) * time.Second)
+		}
+	}()
 }
 
 func (c *WebSocketClient) dialKraken(url string) error {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
-
 	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{})
 	if err != nil {
 		err = fmt.Errorf("error dialing kraken | %w", err)
