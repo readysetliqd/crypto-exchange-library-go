@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"log"
@@ -133,23 +134,27 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
-		// TODO implement retry, 403 error when system is under maintenance,
-		// GetSystemStatus also returns 403 when under maintenance. does it return
-		// 403 for prohibited vpn locations? no internet err contains "no such host"
+		if errors.Is(err, errNoInternetConnection) {
+			log.Printf("encountered error; attempting reauth | %s", err.Error())
+			// TODO implement reauth
+		} else if errors.Is(err, err403Forbidden) {
+			log.Printf("encountered error; attempting reauth | %s", err.Error())
+			// TODO implement reauth
+		}
 		return fmt.Errorf("error authenticating websockets | %w", err)
 	}
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{}
-	err = kc.dialKraken(wsPublicURL)
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager}
+	err = kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
 	if err != nil {
 		return fmt.Errorf("error dialing kraken public url | %w", err)
 	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{}
-	err = kc.dialKraken(wsPrivateURL)
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager}
+	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
 	if err != nil {
 		return fmt.Errorf("error dialing kraken private url | %w", err)
 	}
-	kc.startMessageReader()
-	kc.startAuthMessageReader()
+	kc.WebSocketManager.WebSocketClient.startMessageReader()
+	kc.WebSocketManager.AuthWebSocketClient.startMessageReader()
 	kc.WebSocketManager.Mutex.Lock()
 	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
 	kc.WebSocketManager.Mutex.Unlock()
@@ -1065,89 +1070,51 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	return nil
 }
 
+// TODO combine with auth message reader and change method to attach *WebSocketClient type
+// TODO when do that change calls to this method in dialKraken()
 // Starts a goroutine that continuously reads messages from the WebSocket
 // connection. If the message is not a heartbeat message, it routes the message.
-func (ws *WebSocketManager) startMessageReader() {
+func (c *WebSocketClient) startMessageReader() {
 	go func() {
 		for {
 			select {
-			case <-ws.WebSocketClient.Ctx.Done():
+			case <-c.Ctx.Done():
 				return
 			default:
-				_, msg, err := ws.WebSocketClient.Conn.ReadMessage()
+				_, msg, err := c.Conn.ReadMessage()
 				if err != nil {
 					if err != nil {
 						if err, ok := err.(net.Error); ok && err.Timeout() {
 							log.Println("websocket connection timed out, attempting reconnect")
-							ws.WebSocketClient.Cancel()
-							ws.WebSocketClient.Conn.Close()
-							ws.reconnect(wsPublicURL)
+							c.Cancel()
+							c.Conn.Close()
+							c.reconnect(wsPublicURL)
+							return
 						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
 							log.Println("unexpected websocket closure, attempting reconnect")
-							ws.WebSocketClient.Cancel()
-							ws.WebSocketClient.Conn.Close()
-							ws.reconnect(wsPublicURL)
+							c.Cancel()
+							c.Conn.Close()
+							c.reconnect(wsPublicURL)
+							return
 						} else if strings.Contains(err.Error(), "wsarecv") {
 							log.Println("internet connection lost, attempting reconnect")
-							ws.WebSocketClient.Cancel()
-							ws.WebSocketClient.Conn.Close()
-							ws.reconnect(wsPublicURL)
+							c.Cancel()
+							c.Conn.Close()
+							c.reconnect(wsPublicURL)
+							return
 						}
 						log.Println("error reading message | ", err)
 						continue
 					}
 				}
 				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
-					err := ws.routeMessage(msg)
+					err := c.Router.routeMessage(msg)
 					if err != nil {
 						log.Println(err)
 					}
 				} else {
 					// reset timeout delay on heartbeat message
-					ws.WebSocketClient.Conn.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
-				}
-			}
-		}
-	}()
-}
-
-// Starts a goroutine that continuously reads messages from the private WebSocket
-// connection. If the message is not a heartbeat message, it routes the message.
-func (ws *WebSocketManager) startAuthMessageReader() {
-	go func() {
-		for {
-			select {
-			case <-ws.AuthWebSocketClient.Ctx.Done():
-				return
-			default:
-				_, msg, err := ws.AuthWebSocketClient.Conn.ReadMessage()
-				if err != nil {
-					if err, ok := err.(net.Error); ok && err.Timeout() {
-						ws.AuthWebSocketClient.Cancel()
-						ws.AuthWebSocketClient.Conn.Close()
-						ws.reconnect(wsPrivateURL)
-					} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
-						log.Println("unexpected websocket closure, attempting reconnect")
-						ws.AuthWebSocketClient.Cancel()
-						ws.AuthWebSocketClient.Conn.Close()
-						ws.reconnect(wsPrivateURL)
-					} else if strings.Contains(err.Error(), "wsarecv") {
-						log.Println("internet connection lost, attempting reconnect")
-						ws.AuthWebSocketClient.Cancel()
-						ws.AuthWebSocketClient.Conn.Close()
-						ws.reconnect(wsPrivateURL)
-					}
-					log.Println("error reading message | ", err)
-					continue
-				}
-				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
-					err := ws.routeMessage(msg)
-					if err != nil {
-						log.Println(err)
-					}
-				} else {
-					// reset timeout delay on heartbeat message
-					ws.AuthWebSocketClient.Conn.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
+					c.Conn.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
 				}
 			}
 		}
@@ -1332,12 +1299,12 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 
 // Attempts reconnect with dialKraken() method. Retries 5 times instantly then
 // scales back to attempt reconnect once every ~8 seconds.
-func (ws *WebSocketManager) reconnect(url string) error {
+func (c *WebSocketClient) reconnect(url string) error {
 	go func() {
 		t := 1.0
 		count := 0
 		for {
-			err := ws.dialKraken(url)
+			err := c.dialKraken(url)
 			if err != nil {
 				log.Printf("encountered error on reconnecting, trying again | %s", err)
 			} else {
@@ -1354,30 +1321,23 @@ func (ws *WebSocketManager) reconnect(url string) error {
 			time.Sleep(time.Duration(t) * time.Second)
 		}
 	}()
+	c.startMessageReader()
 	return nil
 }
 
-func (ws *WebSocketManager) dialKraken(url string) error {
-	ws.Mutex.Lock()
-	defer ws.Mutex.Unlock()
+func (c *WebSocketClient) dialKraken(url string) error {
+	c.Mutex.Lock()
+	defer c.Mutex.Unlock()
 
 	conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{})
 	if err != nil {
 		err = fmt.Errorf("error dialing kraken | %w", err)
 		return err
 	}
-	var targetClient *WebSocketClient
-	switch url {
-	case wsPublicURL:
-		targetClient = ws.WebSocketClient
-
-	case wsPrivateURL:
-		targetClient = ws.AuthWebSocketClient
-	}
-	targetClient.Conn = conn
-	targetClient.Ctx, targetClient.Cancel = context.WithCancel(context.Background())
+	c.Conn = conn
+	c.Ctx, c.Cancel = context.WithCancel(context.Background())
 	// initialize read deadline to prevent blocking
-	targetClient.Conn.SetReadDeadline(time.Now().Add(timeoutDelay * time.Second))
+	c.Conn.SetReadDeadline(time.Now().Add(timeoutDelay * time.Second))
 	return nil
 }
 

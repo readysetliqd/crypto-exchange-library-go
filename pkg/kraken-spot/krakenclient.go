@@ -62,6 +62,11 @@ type WebSocketClient struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
 	Mutex  sync.Mutex
+	Router MessageRouter
+}
+
+type MessageRouter interface {
+	routeMessage(msg []byte) error
 }
 
 // Internal order book management

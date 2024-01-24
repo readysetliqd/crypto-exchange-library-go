@@ -3841,8 +3841,7 @@ func (kc *KrakenClient) GetWebSocketsToken() (*WebSocketsToken, error) {
 func (kc *KrakenClient) AuthenticateWebSockets() error {
 	tokenResp, err := kc.GetWebSocketsToken()
 	if err != nil {
-		err = fmt.Errorf("error calling getwebsocketstoken() | %w", err)
-		return err
+		return fmt.Errorf("error calling getwebsocketstoken() | %w", err)
 	}
 	kc.WebSocketManager.Mutex.Lock()
 	kc.WebSocketManager.WebSocketToken = tokenResp.Token
@@ -3872,7 +3871,12 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 
 	req, err := http.NewRequest("POST", baseUrl+urlPath, strings.NewReader(values.Encode()))
 	if err != nil {
-		return nil, err
+		if strings.Contains(err.Error(), "lookup") && strings.Contains(err.Error(), "no such host") {
+			return nil, fmt.Errorf("%w | %w", errNoInternetConnection, err)
+		} else if strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "forbidden") {
+			return nil, fmt.Errorf("%w | %w", err403Forbidden, err)
+		}
+		return nil, fmt.Errorf("error calling http.NewRequest() | %w", err)
 	}
 	req.Header.Add("API-Key", kc.APIKey)
 	req.Header.Add("API-Sign", signature)

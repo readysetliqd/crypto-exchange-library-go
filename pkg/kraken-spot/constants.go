@@ -98,3 +98,5 @@ var maxCounterMap = map[uint8]uint8{
 const usdDecimalsFormat = "%.4f"
 
 var errNotABookUpdateMsg = errors.New("not a book update message")
+var errNoInternetConnection = errors.New("no internet connection")
+var err403Forbidden = errors.New("forbidden error encountered; check Kraken's server status and/or your IP's geolocation")
