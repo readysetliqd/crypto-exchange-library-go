@@ -20,7 +20,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO add order response callback initializer method and add callback to ws manager struct
+// TODO make kraken client return api and ws and un embed those structs
 // TODO add optional reqid to ALL websocket requests
 // TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
 // TODO add an initializer method for orderStatusCallback
@@ -776,6 +776,68 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
 // #endregion
 
 // #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s))
+
+// Sets OrderStatusCallback to the function passed to arg 'orderStatus'. This
+// function determines the behavior of the program when orderStatus type
+// messages are received. Recommended to use with a switch case for each of
+// the order status types.
+//
+// # Order Status Types:
+//
+//	WSAddOrderResp
+//
+//	WSEditOrderResp
+//
+//	WSCancelOrderResp
+//
+//	WSCancelAllResp
+//
+//	WSCancelAllAfterResp
+//
+// # Example Usage:
+//
+//	var orderID string
+//	orderStatusCallback := func(orderStatus interface{}) {
+//		log.Println(orderStatus)
+//		switch s := orderStatus.(type) {
+//		case ks.WSAddOrderResp:
+//			log.Println(s)
+//			if s.Status == "ok" {
+//				log.Println("order added! updating orderID")
+//				orderID = s.TxID
+//			}
+//		case ks.WSEditOrderResp:
+//			log.Println(s)
+//			if s.Status == "ok" {
+//				log.Println("order edited! updating orderID")
+//				orderID = s.TxID
+//			}
+//		case ks.WSCancelOrderResp:
+//			log.Println(s)
+//			if s.Status == "ok" {
+//				log.Println("order cancelled!")
+//			}
+//		}
+//	}
+//	kc.WebSocketManager.SetOrderStatusCallback(orderStatusCallback)
+//	for {
+//		select {
+//			case <-ticker1.C:
+//				kc.WSAddOrder(ks.WSLimit("10000"), "buy", "0.1", pair)
+//				ticker1.Stop()
+//			case <-ticker2.C:
+//				kc.WSEditOrder(orderID, pair, ks.WSNewPrice("8000"))
+//				ticker2.Stop()
+//			case <-ticker3.C:
+//				kc.WSCancelOrder(orderID)
+//				ticker3.Stop()
+//		}
+//	}
+func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orderStatus interface{})) {
+	ws.Mutex.Lock()
+	ws.OrderStatusCallback = orderStatusCallback
+	ws.Mutex.Unlock()
+}
 
 // Sends an 'orderType' order request on the side 'direction' (buy or sell) of
 // amount/qty/size 'volume' for the specified 'pair' passed to args to Kraken's
