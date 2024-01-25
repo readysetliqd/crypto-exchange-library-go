@@ -1,6 +1,7 @@
 package krakenspot
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -57,6 +58,7 @@ type WebSocketManager struct {
 	WebSocketToken       string
 	SubscriptionMgr      *SubscriptionManager
 	OrderBookMgr         *OrderBookManager
+	TradeLogger          *TradeLogger
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
 	ErrorLogger          *log.Logger
@@ -94,6 +96,14 @@ type SubscriptionManager struct {
 	PublicSubscriptions  map[string]map[string]*Subscription
 	PrivateSubscriptions map[string]*Subscription
 	Mutex                sync.RWMutex
+}
+
+type TradeLogger struct {
+	file      *os.File
+	writer    *bufio.Writer
+	wg        sync.WaitGroup
+	ch        chan (map[string]WSOwnTrade)
+	isLogging atomic.Bool
 }
 
 type Subscription struct {
@@ -191,7 +201,8 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 //	// Set the KrakenClient logger to write to the file
 //	logger := kc.SetErrorLogger(file)
 //
-//	// Now when you use the KrakenClient, it will log to the file
+//	// Now when you use the KrakenClient, it will log internal errors to the file
+//	// But you still need to call the logger for externally returned errors
 //	err = kc.Connect()
 //	if err != nil {
 //		logger.Println("error connecting")

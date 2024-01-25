@@ -1,14 +1,17 @@
 package krakenspot
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,10 +22,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
 // TODO add OrderManager to keep current state of open trades in memory
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
-// TODO add trades logger and initializer to write trades to file
 // TODO test if callbacks can be nil and end user can access channels with go routines
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 
@@ -237,7 +238,12 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 	if len(reqID) > 1 {
 		return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
 	}
+
 	ws.SubscriptionMgr.Mutex.Lock()
+	defer ws.SubscriptionMgr.Mutex.Unlock()
+
+	// iterate over all active subscriptions stored in SubscriptionMgr and call
+	// corresponding Unsubscribe<channel> method
 	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
 		switch channelName {
 		case "ownTrades":
@@ -817,6 +823,136 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
 }
 
+// Starts trade logger which opens (or creates if not exists) file with 'filename'.
+// Appends all incoming trades from Kraken's "ownTrades" channel. Suggested to call
+// this method before SubscribeOwnTrades(). Will log errors to ErrorLogger (defaults
+// to stdout if none is set) and structures a message to log to TradeLogger file.
+//
+// Note: Calling SubscribeOwnTrades(callback, options ...) without passing
+// WithoutSnapshot() to 'options' will result in the latest 50 trades in the
+// snapshot to be logged to the log file. This can cause duplicate entries if
+// channel is unsubscribed/resubscribed, whether intentionally or due to
+// connection errors.
+//
+// # Example Usage:
+//
+//	err := kc.StartTradeLogger("todays_trades.log")
+//	ownTradesCallback := func(ownTradesData interface{}) {
+//		// Don't need to do anything extra here for trades to be logged
+//		log.Println("an executed trade was logged by the logger!")
+//	}
+//	kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
+//	// deferred function to close "todays_trades.log" in event of panic or shutdown
+//	defer func() {
+//		if r := recover(); r != nil {
+//			fmt.Println("Recovered from panic:", r)
+//		}
+//		err := kc.StopTradeLogger()
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//	}()
+func (ws *WebSocketManager) StartTradeLogger(filename string) error {
+	if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
+		return errors.New("tradeLogger is already running")
+	}
+
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("error opening file %s | %w", filename, err)
+	}
+	ws.Mutex.Lock()
+	ws.TradeLogger = &TradeLogger{
+		file:   file,
+		writer: bufio.NewWriter(file),
+		ch:     make(chan map[string]WSOwnTrade, 100),
+	}
+	ws.TradeLogger.isLogging.Store(true)
+	ws.Mutex.Unlock()
+	ws.TradeLogger.wg.Add(1)
+
+	go func() {
+		defer ws.TradeLogger.wg.Done()
+
+		for trade := range ws.TradeLogger.ch {
+			tradeJson, err := json.Marshal(trade)
+			if err != nil {
+				ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
+				continue
+			}
+			_, err = ws.TradeLogger.writer.WriteString(string(tradeJson) + "\n")
+			if err != nil {
+				ws.handleTradeLoggerError("error writing trade JSON to string", err, trade)
+				continue
+			}
+			err = ws.TradeLogger.writer.Flush()
+			if err != nil {
+				ws.handleTradeLoggerError("error flushing writer", err, trade)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// Waits until go routine finishes writing trades to file then closes TradeLogger
+// channel and Tradelogger file. Recommended to call this method explicitly and/or
+// inside of a defer func to ensure file close is triggered. Logic within this
+// method is behind an atomic.bool check, so calling this method multiple times
+// should not cause any issues in your program.
+//
+// # Example Usage:
+//
+//	// Create the WebSocketManager and start the TradeLogger
+//	err := kc.StartTradeLogger("trades.log")
+//	// Defer a function to recover from a panic and call StopTradeLogger() for "trades.log" file closure
+//	defer func() {
+//		if r := recover(); r != nil {
+//			fmt.Println("Recovered from panic:", r)
+//		}
+//		err := ws.StopTradeLogger()
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//	}()
+//	//...Your program logic here...//
+//	// Listen for shutdown signals
+//	shutdown := make(chan os.Signal, 1)
+//	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+//	// Wait for a shutdown signal
+//	<-shutdown
+func (ws *WebSocketManager) StopTradeLogger() error {
+	if ws.TradeLogger == nil {
+		return fmt.Errorf("trade logger never initialized, call StartTradeLogger() method")
+	}
+	if ws.TradeLogger.isLogging.CompareAndSwap(true, false) {
+		close(ws.TradeLogger.ch)
+		ws.TradeLogger.wg.Wait()
+		return ws.TradeLogger.file.Close()
+	}
+	return fmt.Errorf("trade logger is already stopped")
+}
+
+// Helper method to structure error messages and log them to both the TradeLogger
+// file and to ErrorLogger.
+func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err error, trade map[string]WSOwnTrade) {
+	ws.ErrorLogger.Println(errorMessage + " | " + err.Error())
+	errorLog := map[string]string{
+		"error":   err.Error(),
+		"message": errorMessage,
+		"trade":   fmt.Sprintf("%+v", trade),
+	}
+	errorLogJson, err := json.Marshal(errorLog)
+	if err != nil {
+		ws.ErrorLogger.Println("error marshalling errorLog to JSON | ", err)
+		return
+	}
+	_, err = ws.TradeLogger.writer.WriteString(string(errorLogJson) + "\n")
+	if err != nil {
+		ws.ErrorLogger.Println("error writing errorLogJson to string | ", err)
+	}
+}
+
 // Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
 // callback function to dictate what to do with incoming data. Accepts none or
 // many functional options args 'options'.
@@ -856,7 +992,7 @@ func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options
 	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
-		return fmt.Errorf("error calling subscribeprivate method | %w", err)
+		return fmt.Errorf("error calling subscribePrivate() method | %w", err)
 	}
 	return nil
 }
@@ -1315,6 +1451,9 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	if !publicChannelNames[channelName] {
 		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
 	}
+	if ws.WebSocketClient == nil {
+		return fmt.Errorf("websocket client not connected, try Connect() or ConnectPublic()")
+	}
 
 	sub := newSub(channelName, pair, callback)
 
@@ -1381,6 +1520,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	if !privateChannelNames[channelName] {
 		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
 	}
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("authenticated client not connected, try Connect() or ConnectPrivate()")
+	}
 
 	sub := newSub(channelName, "", callback)
 
@@ -1391,7 +1533,7 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 
 	// Build payload and send subscription message
 	ws.AuthWebSocketClient.Mutex.Lock()
-	if ws.WebSocketClient.Conn != nil {
+	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
 		if err != nil {
 			err = fmt.Errorf("error writing subscription message | %w", err)
@@ -1401,35 +1543,79 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	ws.AuthWebSocketClient.Mutex.Unlock()
 
 	// Start go routine listen for incoming data and call callback functions
-	go func() {
-		<-sub.ConfirmedChan // wait for subscription confirmed
-		for {
-			select {
-			case data := <-sub.DataChan:
-				if sub.DataChanClosed == 0 { // channel is open
-					sub.Callback(data)
-				}
-			case <-sub.DoneChan:
-				if sub.DoneChanClosed == 0 { // channel is open
-					sub.closeChannels()
-					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
-					delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-					ws.SubscriptionMgr.Mutex.Unlock()
-					return
-				}
-			case <-ws.AuthWebSocketClient.Ctx.Done():
-				if sub.DoneChanClosed == 0 { // channel is open
-					sub.closeChannels()
-					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
-					delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-					ws.SubscriptionMgr.Mutex.Unlock()
-					return
+	switch channelName {
+	case "ownTrades":
+		go func() {
+			<-sub.ConfirmedChan // wait for subscription confirmed
+			for {
+				select {
+				case data := <-sub.DataChan:
+					if sub.DataChanClosed == 0 { // channel is open
+						sub.Callback(data)
+						if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
+							ownTrades, ok := data.(WSOwnTradesResp)
+							log.Println("ownTrades:\n", ownTrades)
+							if !ok {
+								ws.ErrorLogger.Println("error asserting data to WSOwnTradesResp")
+							} else {
+								for _, trade := range ownTrades.OwnTrades {
+									ws.TradeLogger.ch <- trade
+								}
+							}
+						}
+					}
+				case <-sub.DoneChan:
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+						ws.SubscriptionMgr.Mutex.Unlock()
+						return
+					}
+				case <-ws.AuthWebSocketClient.Ctx.Done():
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+						ws.SubscriptionMgr.Mutex.Unlock()
+						return
+					}
 				}
 			}
-		}
-	}()
+		}()
+	case "openOrders":
+		go func() {
+			<-sub.ConfirmedChan // wait for subscription confirmed
+			for {
+				select {
+				case data := <-sub.DataChan:
+					if sub.DataChanClosed == 0 { // channel is open
+						sub.Callback(data)
+					}
+				case <-sub.DoneChan:
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+						ws.SubscriptionMgr.Mutex.Unlock()
+						return
+					}
+				case <-ws.AuthWebSocketClient.Ctx.Done():
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+						ws.SubscriptionMgr.Mutex.Unlock()
+						return
+					}
+				}
+			}
+		}()
+	}
 	return nil
 }
 
@@ -1446,7 +1632,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 				if err != nil {
 					if err != nil {
 						if err, ok := err.(net.Error); ok && err.Timeout() {
-							c.ErrorLogger.Println("websocket connection timed out, attempting reconnect")
+							c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1454,7 +1640,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
-							c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect")
+							c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1462,7 +1648,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						} else if strings.Contains(err.Error(), "wsarecv") {
-							c.ErrorLogger.Println("internet connection lost, attempting reconnect")
+							c.ErrorLogger.Println("internet connection lost, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1470,14 +1656,14 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						}
-						c.ErrorLogger.Println("error reading message | ", err)
+						c.ErrorLogger.Println("error reading message |", err)
 						continue
 					}
 				}
 				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
 					err := c.Router.routeMessage(msg)
 					if err != nil {
-						c.ErrorLogger.Println("error routing message | ", err)
+						c.ErrorLogger.Println("error routing message |", err)
 					}
 				} else {
 					// reset timeout delay on heartbeat message
@@ -1676,6 +1862,7 @@ func (c *WebSocketClient) reconnect(url string) error {
 				c.ErrorLogger.Printf("encountered error on reconnecting, trying again | %s\n", err)
 			} else {
 				c.ErrorLogger.Println("reconnect successful")
+				c.IsReconnecting.Store(false)
 				return
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
@@ -1689,7 +1876,6 @@ func (c *WebSocketClient) reconnect(url string) error {
 			time.Sleep(time.Duration(t) * time.Second)
 		}
 	}()
-	c.IsReconnecting.Store(false)
 	// Reauthenticate WebSocket token if Private
 	if url == wsPrivateURL {
 		err := c.Authenticator.AuthenticateWebSockets()
