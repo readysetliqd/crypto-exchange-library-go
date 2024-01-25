@@ -20,8 +20,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO make kraken client return api and ws and un embed those structs
-// TODO add optional reqid to ALL websocket requests
 // TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
 // TODO add an initializer method for orderStatusCallback
 // TODO add OrderManager to keep current state of open trades in memory
@@ -230,22 +228,35 @@ func (kc *KrakenClient) connectPrivate() error {
 }
 
 // Iterates through all open public and private subscriptions and sends an
-// unsubscribe message to Kraken's WebSocket server for each.
+// unsubscribe message to Kraken's WebSocket server for each. Accepts 0 or 1
+// optional arg 'reqID' request ID to send with all Unsubscribe<channel> methods
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeAll()
-func (ws *WebSocketManager) UnsubscribeAll() error {
+func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
+	var err error
+	if len(reqID) > 1 {
+		return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+	}
 	ws.SubscriptionMgr.Mutex.Lock()
 	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
 		switch channelName {
 		case "ownTrades":
-			err := ws.UnsubscribeOwnTrades()
+			if len(reqID) > 0 {
+				err = ws.UnsubscribeOwnTrades(UnsubscribeOwnTradesReqID(reqID[0]))
+			} else {
+				err = ws.UnsubscribeOwnTrades()
+			}
 			if err != nil {
 				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
 			}
 		case "openOrders":
-			err := ws.UnsubscribeOpenOrders()
+			if len(reqID) > 0 {
+				err = ws.UnsubscribeOpenOrders(UnsubscribeOpenOrdersReqID(reqID[0]))
+			} else {
+				err = ws.UnsubscribeOpenOrders()
+			}
 			if err != nil {
 				return fmt.Errorf("error unsubscribing from openorders | %w", err)
 			}
@@ -257,15 +268,36 @@ func (ws *WebSocketManager) UnsubscribeAll() error {
 		switch {
 		case channelName == "ticker":
 			for pair := range pairMap {
-				ws.UnsubscribeTicker(pair)
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeTicker(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeTicker(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from ticker | %w", err)
+				}
 			}
 		case channelName == "trade":
 			for pair := range pairMap {
-				ws.UnsubscribeTrade(pair)
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeTrade(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeTrade(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from trade | %w", err)
+				}
 			}
 		case channelName == "spread":
 			for pair := range pairMap {
-				ws.UnsubscribeSpread(pair)
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeSpread(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeSpread(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from spread | %w", err)
+				}
 			}
 		case strings.HasPrefix(channelName, "ohlc"):
 			_, intervalStr, _ := strings.Cut(channelName, "-")
@@ -274,7 +306,14 @@ func (ws *WebSocketManager) UnsubscribeAll() error {
 				return fmt.Errorf("error parsing uint from interval | %w", err)
 			}
 			for pair := range pairMap {
-				ws.UnsubscribeOHLC(pair, uint16(interval))
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeOHLC(pair, uint16(interval), ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeOHLC(pair, uint16(interval))
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from ohlc | %w", err)
+				}
 			}
 		case strings.HasPrefix(channelName, "book"):
 			_, depthStr, _ := strings.Cut(channelName, "-")
@@ -283,7 +322,14 @@ func (ws *WebSocketManager) UnsubscribeAll() error {
 				return fmt.Errorf("error parsing uint from depth | %w", err)
 			}
 			for pair := range pairMap {
-				ws.UnsubscribeBook(pair, uint16(depth))
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeBook(pair, uint16(depth), ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeBook(pair, uint16(depth))
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from book | %w", err)
+				}
 			}
 		}
 	}
@@ -291,7 +337,12 @@ func (ws *WebSocketManager) UnsubscribeAll() error {
 }
 
 // Subscribes to "ticker" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data.
+// callback function to dictate what to do with incoming data. Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
@@ -304,25 +355,42 @@ func (ws *WebSocketManager) UnsubscribeAll() error {
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeTicker(pair string, callback GenericCallback, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 2 or 3", err)
+	}
+	// Build payload and subscribe
 	channelName := "ticker"
-	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := ws.subscribePublic(channelName, payload, pair, callback)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
+	err = ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
 	return nil
 }
 
-// Unsubscribes from "ticker" WebSocket channel for arg 'pair'
+// Unsubscribes from "ticker" WebSocket channel for arg 'pair'. Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeTicker("XBT/USD")
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
+func (ws *WebSocketManager) UnsubscribeTicker(pair string, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 1 or 2", err)
+	}
+	// Build payload and unsubscribe
 	channelName := "ticker"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
 	ws.WebSocketClient.Mutex.Lock()
 	if ws.WebSocketClient.Conn != nil {
 		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -338,11 +406,16 @@ func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
 // Subscribes to "ohlc" WebSocket channel for arg 'pair' and specified 'interval'
 // in minutes. On subscribing, sends last valid closed candle (had at least one
 // trade), irrespective of time. Must pass a valid callback function to dictate
-// what to do with incoming data.
+// what to do with incoming data.  Accepts up to one functional options arg
+// 'options' for reqID.
 //
 // # Enum:
 //
 // 'interval' - 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
@@ -355,11 +428,17 @@ func (ws *WebSocketManager) UnsubscribeTicker(pair string) error {
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback GenericCallback, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 3 or 4", err)
+	}
+	// Build payload and subscribe
 	name := "ohlc"
 	channelName := fmt.Sprintf("%s-%v", name, interval)
-	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, name, interval)
-	err := ws.subscribePublic(channelName, payload, pair, callback)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}%s}`, pair, name, interval, buffer.String())
+	err = ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
@@ -367,19 +446,29 @@ func (ws *WebSocketManager) SubscribeOHLC(pair string, interval uint16, callback
 }
 
 // Unsubscribes from "ohlc" WebSocket channel for arg 'pair' and specified 'interval'
-// in minutes.
+// in minutes.  Accepts up to one functional options arg 'options' for reqID.
 //
 // # Enum:
 //
 // 'interval' - 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
 //
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
+//
 // # Example Usage:
 //
 //	err := kc.UnsubscribeOHLC("XBT/USD", 1)
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error {
+func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 2 or 3", err)
+	}
+	// Build payload and unsubscribe
 	channelName := "ohlc"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}}`, pair, channelName, interval)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "interval": %v}%s}`, pair, channelName, interval, buffer.String())
 	ws.WebSocketClient.Mutex.Lock()
 	if ws.WebSocketClient.Conn != nil {
 		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -393,7 +482,12 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error 
 }
 
 // Subscribes to "trade" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data.
+// callback function to dictate what to do with incoming data. Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
@@ -406,26 +500,43 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16) error 
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeTrade(pair string, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeTrade(pair string, callback GenericCallback, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 2 or 3", err)
+	}
+	// Build payload and subscribe
 	channelName := "trade"
-	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
 	// ctx, cancel := ... here?
-	err := ws.subscribePublic(channelName, payload, pair, callback)
+	err = ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
 	return nil
 }
 
-// Unsubscribes from "trade" WebSocket channel for arg 'pair'
+// Unsubscribes from "trade" WebSocket channel for arg 'pair'  Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeTrade("XBT/USD")
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
+func (ws *WebSocketManager) UnsubscribeTrade(pair string, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 1 or 2", err)
+	}
+	// Build payload and unsubscribe
 	channelName := "trade"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
 	ws.WebSocketClient.Mutex.Lock()
 	if ws.WebSocketClient.Conn != nil {
 		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -439,7 +550,12 @@ func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
 }
 
 // Subscribes to "spread" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data.
+// callback function to dictate what to do with incoming data.  Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
@@ -452,25 +568,42 @@ func (ws *WebSocketManager) UnsubscribeTrade(pair string) error {
 //	if err != nil {
 //		log.Println(err)
 //	}
-func (ws *WebSocketManager) SubscribeSpread(pair string, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeSpread(pair string, callback GenericCallback, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 2 or 3", err)
+	}
+	// Build payload and subscribe
 	channelName := "spread"
-	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
-	err := ws.subscribePublic(channelName, payload, pair, callback)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
+	err = ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
 	return nil
 }
 
-// Unsubscribes from "spread" WebSocket channel for arg 'pair'
+// Unsubscribes from "spread" WebSocket channel for arg 'pair'. Accepts up to one
+// functional options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeSpread("XBT/USD")
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
+func (ws *WebSocketManager) UnsubscribeSpread(pair string, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 1 or 2", err)
+	}
+	// Build payload and unsubscribe
 	channelName := "spread"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}}`, pair, channelName)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s"}%s}`, pair, channelName, buffer.String())
 	ws.WebSocketClient.Mutex.Lock()
 	if ws.WebSocketClient.Conn != nil {
 		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -500,9 +633,15 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 //
 //	func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error)
 //
+// Accepts up to one functional options arg 'options' for reqID.
+//
 // # Enum:
 //
 // 'depth' - 10, 25, 100, 500, 1000
+//
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
 //
 // # Example Usage:
 //
@@ -566,14 +705,20 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string) error {
 //	for range ticker.C {
 //		log.Println(book)
 //	}
-func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback GenericCallback) error {
+func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback GenericCallback, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 3 or 4", err)
+	}
+	// Build payload and subscribe
 	name := "book"
 	channelName := fmt.Sprintf("%s-%v", name, depth)
-	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, name, depth)
+	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}%s}`, pair, name, depth, buffer.String())
 	if callback == nil {
 		callback = ws.bookCallback(channelName, pair, depth)
 	}
-	err := ws.subscribePublic(channelName, payload, pair, callback)
+	err = ws.subscribePublic(channelName, payload, pair, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribepublic method | %w", err)
 	}
@@ -581,19 +726,30 @@ func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback Ge
 }
 
 // Unsubscribes from "book" WebSocket channel for arg 'pair' and specified 'depth'
-// as number of book entries for each bids and asks.
+// as number of book entries for each bids and asks. Accepts up to one
+// functional options arg 'options' for reqID.
 //
 // # Enum:
 //
 // 'depth' - 10, 25, 100, 500, 1000
 //
+// # Functional Options:
+//
+//	func ReqID(reqID string) ReqIDOption
+//
 // # Example Usage:
 //
 //	err := kc.UnsubscribeBook("XBT/USD", 10)
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16) error {
+func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16, options ...ReqIDOption) error {
+	// Build buffer for functional options
+	buffer, err := buildReqIdBuffer(options)
+	if err != nil {
+		return fmt.Errorf("%w: expected 2 or 3", err)
+	}
+	// Build payload and unsubscribe
 	channelName := "book"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}}`, pair, channelName, depth)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}%s}`, pair, channelName, depth, buffer.String())
 	ws.WebSocketClient.Mutex.Lock()
 	if ws.WebSocketClient.Conn != nil {
 		err := ws.WebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -673,6 +829,8 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 //	func WithoutConsolidatedTaker()
 //	// Whether to send historical feed data snapshot upon subscription. Defaults to true if not called.
 //	func WithoutSnapshot()
+//	// Attach optional request ID 'reqID' to request
+//	func SubscribeOwnTradesReqID(reqID string) SubscribeOwnTradesOption
 //
 // # Example Usage:
 //
@@ -686,12 +844,18 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 //		log.Println(err)
 //	}
 func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options ...SubscribeOwnTradesOption) error {
-	var buffer bytes.Buffer
+	var subscriptionBuffer bytes.Buffer
+	var reqIDBuffer bytes.Buffer
 	for _, option := range options {
-		option(&buffer)
+		switch option.Type() {
+		case SubscriptionOption:
+			option.Apply(&subscriptionBuffer)
+		case PrivateReqIDOption:
+			option.Apply(&reqIDBuffer)
+		}
 	}
 	channelName := "ownTrades"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}}`, channelName, ws.WebSocketToken, buffer.String())
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
@@ -699,15 +863,32 @@ func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options
 	return nil
 }
 
-// Unsubscribes from "ownTrades" WebSocket channel.
+// Unsubscribes from "ownTrades" WebSocket channel. Accepts up to one functional
+// options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	// Attach optional request ID 'reqID' to request
+//	func UnsubscribeOwnTradesReqID(reqID string) UnsubscribeOwnTradesOption
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeOwnTrades()
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
+func (ws *WebSocketManager) UnsubscribeOwnTrades(options ...UnsubscribeOwnTradesOption) error {
+	// Build buffer
+	var buffer bytes.Buffer
+	if len(options) > 0 {
+		if len(options) > 1 {
+			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+		}
+		for _, option := range options {
+			option(&buffer)
+		}
+	}
+	// Build payload and send unsubscribe
 	channelName := "ownTrades"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -721,12 +902,14 @@ func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
 
 // Subscribes to "openOrders" authenticated WebSocket channel. Must pass a valid
 // callback function to dictate what to do with incoming data. Accepts none or
-// one functional options arg passed to 'options'.
+// many functional options arg passed to 'options'.
 //
 // # Functional Options:
 //
 //	// Whether to send rate-limit counter in updates  Defaults to false if not called.
-//	func WithRateCounter()
+//	func WithRateCounter() SubscribeOpenOrdersOption
+//	// Attach optional request ID 'reqID' to request
+//	func SubscribeOpenOrdersReqID(reqID string) SubscribeOpenOrdersOption
 //
 // # Example Usage:
 //
@@ -740,12 +923,18 @@ func (ws *WebSocketManager) UnsubscribeOwnTrades() error {
 //		log.Println(err)
 //	}
 func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, options ...SubscribeOpenOrdersOption) error {
-	var buffer bytes.Buffer
+	var subscriptionBuffer bytes.Buffer
+	var reqIDBuffer bytes.Buffer
 	for _, option := range options {
-		option(&buffer)
+		switch option.Type() {
+		case SubscriptionOption:
+			option.Apply(&subscriptionBuffer)
+		case PrivateReqIDOption:
+			option.Apply(&reqIDBuffer)
+		}
 	}
 	channelName := "openOrders"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}}`, channelName, ws.WebSocketToken, buffer.String())
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
@@ -753,15 +942,27 @@ func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, option
 	return nil
 }
 
-// Unsubscribes from "openOrders" authenticated WebSocket channel.
+// Unsubscribes from "openOrders" authenticated WebSocket channel. Accepts up
+// to one functional options arg 'options' for reqID.
 //
 // # Example Usage:
 //
 //	err := kc.UnsubscribeOpenOrders()
 //	if err != nil...
-func (ws *WebSocketManager) UnsubscribeOpenOrders() error {
+func (ws *WebSocketManager) UnsubscribeOpenOrders(options ...UnsubscribeOpenOrdersOption) error {
+	// Build buffer
+	var buffer bytes.Buffer
+	if len(options) > 0 {
+		if len(options) > 1 {
+			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+		}
+		for _, option := range options {
+			option(&buffer)
+		}
+	}
+	// Build payload and send unsubscribe
 	channelName := "openOrders"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}}`, channelName, ws.WebSocketToken)
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -923,6 +1124,8 @@ func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orde
 //	func WSAddWithDeadline(deadline string) WSAddOrderOption
 //	// Validates inputs only. Does not submit order. Defaults to "false" if not called.
 //	func WSValidateAddOrder() WSAddOrderOption
+//	// Attach optional request ID 'reqID' to request
+//	func WSAddOrderReqID(reqID string) WSAddOrderOption
 //
 // # Example Usage:
 //
@@ -974,6 +1177,8 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 //	func WSNewPostOnly() WSEditOrderOption
 //	// Validate inputs only. Do not submit order. Defaults to false if not called.
 //	func WSValidateEditOrder() WSEditOrderOption
+//	// Attach optional request ID 'reqID' to request
+//	func WSEditOrderReqID(reqID string) WSEditOrderOption
 //
 // # Example Usage:
 //
@@ -1902,6 +2107,20 @@ func stringEntryToDecimal(entry *WSBookEntry) (*InternalBookEntry, error) {
 		Volume: decimalVolume,
 		Time:   decimalTime,
 	}, nil
+}
+
+func buildReqIdBuffer(options []ReqIDOption) (bytes.Buffer, error) {
+	var buffer bytes.Buffer
+	if len(options) > 0 {
+		if len(options) > 1 {
+			return bytes.Buffer{}, ErrTooManyArgs
+		}
+		for _, option := range options {
+			option(&buffer)
+		}
+		return buffer, nil
+	}
+	return bytes.Buffer{}, nil
 }
 
 // #endregion

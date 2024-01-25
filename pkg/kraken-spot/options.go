@@ -1524,30 +1524,126 @@ func EAWithHideZeroAllocations() GetEarnAllocationsOption {
 
 // #region Private WebSocket endpoint functional options
 
-type SubscribeOwnTradesOption func(buffer *bytes.Buffer)
+type ReqIDOption func(buffer *bytes.Buffer)
+
+func ReqID(reqID string) ReqIDOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, reqID))
+	}
+}
+
+type OptionType int
+
+const (
+	SubscriptionOption OptionType = iota
+	PrivateReqIDOption
+)
+
+type SubscribeOwnTradesOption interface {
+	Apply(*bytes.Buffer)
+	Type() OptionType
+}
+
+type subscribeOwnTradesReqID struct {
+	reqID string
+}
+
+func (s *subscribeOwnTradesReqID) Apply(buffer *bytes.Buffer) {
+	buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, s.reqID))
+}
+
+func (s *subscribeOwnTradesReqID) Type() OptionType {
+	return PrivateReqIDOption
+}
+
+// Attach optional request ID 'reqID' to request
+func SubscribeOwnTradesReqID(reqID string) SubscribeOwnTradesOption {
+	return &subscribeOwnTradesReqID{reqID: reqID}
+}
+
+type withoutConsolidatedTaker struct{}
+
+func (w *withoutConsolidatedTaker) Apply(buffer *bytes.Buffer) {
+	buffer.WriteString(`, "consolidate_taker": false`)
+}
+
+func (w *withoutConsolidatedTaker) Type() OptionType {
+	return SubscriptionOption
+}
 
 // Whether to consolidate order fills by root taker trade(s). If false, all
 // order fills will show separately. Defaults to true if not called.
 func WithoutConsolidatedTaker() SubscribeOwnTradesOption {
-	return func(buffer *bytes.Buffer) {
-		buffer.WriteString(`, "consolidate_taker": false`)
-	}
+	return &withoutConsolidatedTaker{}
+}
+
+type withoutSnapshot struct{}
+
+func (w *withoutSnapshot) Apply(buffer *bytes.Buffer) {
+	buffer.WriteString(`, "snapshot": false`)
+}
+
+func (w *withoutSnapshot) Type() OptionType {
+	return SubscriptionOption
 }
 
 // Whether to send historical feed data snapshot upon subscription. Defaults to
 // true if not called.
 func WithoutSnapshot() SubscribeOwnTradesOption {
+	return &withoutSnapshot{}
+}
+
+type UnsubscribeOwnTradesOption func(buffer *bytes.Buffer)
+
+// Attach optional request ID 'reqID' to request
+func UnsubscribeOwnTradesReqID(reqID string) UnsubscribeOwnTradesOption {
 	return func(buffer *bytes.Buffer) {
-		buffer.WriteString(`, "snapshot": false`)
+		buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, reqID))
 	}
 }
 
-type SubscribeOpenOrdersOption func(buffer *bytes.Buffer)
+type SubscribeOpenOrdersOption interface {
+	Apply(*bytes.Buffer)
+	Type() OptionType
+}
+
+type withRateCounter struct{}
+
+func (w *withRateCounter) Apply(buffer *bytes.Buffer) {
+	buffer.WriteString(`, "ratecounter": true`)
+}
+
+func (w *withRateCounter) Type() OptionType {
+	return SubscriptionOption
+}
 
 // Whether to send rate-limit counter in updates  Defaults to false if not called.
 func WithRateCounter() SubscribeOpenOrdersOption {
+	return &withRateCounter{}
+}
+
+type subscribeOpenOrdersReqID struct {
+	reqID string
+}
+
+func (s *subscribeOpenOrdersReqID) Apply(buffer *bytes.Buffer) {
+	buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, s.reqID))
+}
+
+func (s *subscribeOpenOrdersReqID) Type() OptionType {
+	return PrivateReqIDOption
+}
+
+// Attach optional request ID 'reqID' to request
+func SubscribeOpenOrdersReqID(reqID string) SubscribeOpenOrdersOption {
+	return &subscribeOpenOrdersReqID{reqID: reqID}
+}
+
+type UnsubscribeOpenOrdersOption func(*bytes.Buffer)
+
+func UnsubscribeOpenOrdersReqID(reqID string) UnsubscribeOpenOrdersOption {
 	return func(buffer *bytes.Buffer) {
-		buffer.WriteString(`, "ratecounter": true`)
+		buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, reqID))
 	}
 }
 
@@ -2084,6 +2180,13 @@ func WSValidateAddOrder() WSAddOrderOption {
 	}
 }
 
+// Attach optional request ID 'reqID' to request
+func WSAddOrderReqID(reqID string) WSAddOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, reqID))
+	}
+}
+
 type WSEditOrderOption func(buffer *bytes.Buffer)
 
 // Field "userref" is an optional user-specified integer id associated with
@@ -2155,6 +2258,13 @@ func WSNewPostOnly() WSEditOrderOption {
 func WSValidateEditOrder() WSEditOrderOption {
 	return func(buffer *bytes.Buffer) {
 		buffer.WriteString(`, "validate": "true"`)
+	}
+}
+
+// Attach optional request ID 'reqID' to request
+func WSEditOrderReqID(reqID string) WSEditOrderOption {
+	return func(buffer *bytes.Buffer) {
+		buffer.WriteString(fmt.Sprintf(`, "reqid": %s`, reqID))
 	}
 }
 
