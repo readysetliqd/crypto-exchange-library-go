@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,9 +31,10 @@ var sharedClient = &http.Client{
 }
 
 type KrakenClient struct {
-	APIKey    string
-	APISecret []byte
-	Client    *http.Client
+	APIKey      string
+	APISecret   []byte
+	Client      *http.Client
+	ErrorLogger *log.Logger
 
 	*APIManager
 	*WebSocketManager
@@ -55,6 +59,7 @@ type WebSocketManager struct {
 	OrderBookMgr         *OrderBookManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
+	ErrorLogger          *log.Logger
 	Mutex                sync.RWMutex
 }
 
@@ -62,10 +67,11 @@ type WebSocketClient struct {
 	Conn           *websocket.Conn
 	Ctx            context.Context
 	Cancel         context.CancelFunc
-	Mutex          sync.Mutex
 	Router         MessageRouter
 	Authenticator  Authenticator
 	IsReconnecting atomic.Bool
+	ErrorLogger    *log.Logger
+	Mutex          sync.Mutex
 }
 
 type MessageRouter interface {
@@ -138,10 +144,12 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		return nil, err
 	}
 	maxCounter := maxCounterMap[verificationTier]
+	logger := log.New(os.Stderr, "", log.LstdFlags)
 	kc := &KrakenClient{
-		APIKey:    apiKey,
-		APISecret: decodedSecret,
-		Client:    sharedClient,
+		APIKey:      apiKey,
+		APISecret:   decodedSecret,
+		Client:      sharedClient,
+		ErrorLogger: logger,
 	}
 	kc.APIManager = &APIManager{
 		HandleRateLimit: handleRateLimit,
@@ -156,12 +164,49 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		OrderBookMgr: &OrderBookManager{
 			OrderBooks: make(map[string]map[string]*InternalOrderBook),
 		},
+		ErrorLogger: logger,
 	}
 	if handleRateLimit {
 		go kc.startRateLimiter()
 		kc.APIManager.CounterDecayCond = sync.NewCond(&kc.APIManager.Mutex)
 	}
 	return kc, nil
+}
+
+// Creates new custom error logger for KrakenClient and its components to log
+// to file provided to 'output'. This method returns the newly created logger.
+//
+// # Example Usage:
+//
+//	// Open a file for logging
+//	file, err := os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer file.Close()
+//
+//	// Create a new KrakenClient
+//	kc := krakenspot.NewKrakenClient()
+//
+//	// Set the KrakenClient logger to write to the file
+//	logger := kc.SetErrorLogger(file)
+//
+//	// Now when you use the KrakenClient, it will log to the file
+//	err = kc.Connect()
+//	if err != nil {
+//		logger.Println("error connecting")
+//	}
+func (kc *KrakenClient) SetErrorLogger(output io.Writer) *log.Logger {
+	logger := log.New(output, "", log.LstdFlags)
+	kc.ErrorLogger = logger
+	kc.WebSocketManager.ErrorLogger = logger
+	if kc.WebSocketManager.WebSocketClient != nil {
+		kc.WebSocketManager.WebSocketClient.ErrorLogger = logger
+	}
+	if kc.WebSocketManager.AuthWebSocketClient != nil {
+		kc.WebSocketManager.AuthWebSocketClient.ErrorLogger = logger
+	}
+	return logger
 }
 
 // A go routine method with a timer that decays kc.APICounter every second by the

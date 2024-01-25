@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -91,16 +90,15 @@ func (kc *KrakenClient) GetSystemStatus() (*SystemStatus, error) {
 //	if !online {
 //		log.Println(status)
 //	}
-func (kc *KrakenClient) SystemIsOnline() (bool, string) {
+func (kc *KrakenClient) SystemIsOnline() (bool, string, error) {
 	systemStatus, err := kc.GetSystemStatus()
 	if err != nil {
-		log.Println("error calling GetSystemStatus() | ", err)
-		return false, "error"
+		return false, "error", fmt.Errorf("error calling GetSystemStatus() | %w", err)
 	}
 	if systemStatus.Status == "online" {
-		return true, systemStatus.Status
+		return true, systemStatus.Status, nil
 	}
-	return false, systemStatus.Status
+	return false, systemStatus.Status, nil
 }
 
 // Calls Kraken API public market data "Assets" endpoint. Gets information about
@@ -3895,7 +3893,7 @@ func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 	if kc.HandleRateLimit {
 		kc.APIManager.Mutex.Lock()
 		for kc.APICounter+incrementAmount >= kc.MaxAPICounter {
-			log.Println("Counter will exceed rate limit. Waiting")
+			kc.ErrorLogger.Println("Counter will exceed rate limit. Waiting")
 			kc.CounterDecayCond.Wait()
 		}
 		if kc.APICounter == 0 {

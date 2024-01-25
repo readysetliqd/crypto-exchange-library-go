@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"log"
 	"net"
 	"net/http"
 	"sort"
@@ -21,7 +20,6 @@ import (
 )
 
 // TODO write a SetLogger method and add Logger to WebSocketManager struct for error handling
-// TODO add an initializer method for orderStatusCallback
 // TODO add OrderManager to keep current state of open trades in memory
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO add trades logger and initializer to write trades to file
@@ -163,7 +161,7 @@ func (kc *KrakenClient) ConnectPublic(systemStatusCallback func(status string)) 
 // Helper method that initializes WebSocketClient for public endpoints by
 // dialing Kraken's server and starting its message reader.
 func (kc *KrakenClient) connectPublic() error {
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}}
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
 	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
 	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
 	if err != nil {
@@ -208,16 +206,16 @@ func (kc *KrakenClient) connectPrivate() error {
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
 		if errors.Is(err, errNoInternetConnection) {
-			log.Printf("encountered error; attempting reauth | %s", err.Error())
+			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 			kc.reauthenticate()
 		} else if errors.Is(err, err403Forbidden) {
-			log.Printf("encountered error; attempting reauth | %s", err.Error())
+			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 			kc.reauthenticate()
 		} else {
-			log.Printf("unknown error encountered while authenticating WebSockets | %s", err.Error())
+			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
 		}
 	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}}
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
 	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
 	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
 	if err != nil {
@@ -1448,7 +1446,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 				if err != nil {
 					if err != nil {
 						if err, ok := err.(net.Error); ok && err.Timeout() {
-							log.Println("websocket connection timed out, attempting reconnect")
+							c.ErrorLogger.Println("websocket connection timed out, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1456,7 +1454,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
-							log.Println("unexpected websocket closure, attempting reconnect")
+							c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1464,7 +1462,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						} else if strings.Contains(err.Error(), "wsarecv") {
-							log.Println("internet connection lost, attempting reconnect")
+							c.ErrorLogger.Println("internet connection lost, attempting reconnect")
 							c.Cancel()
 							c.Conn.Close()
 							if c.IsReconnecting.CompareAndSwap(false, true) {
@@ -1472,14 +1470,14 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							}
 							return
 						}
-						log.Println("error reading message | ", err)
+						c.ErrorLogger.Println("error reading message | ", err)
 						continue
 					}
 				}
 				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
 					err := c.Router.routeMessage(msg)
 					if err != nil {
-						log.Println(err)
+						c.ErrorLogger.Println("error routing message | ", err)
 					}
 				} else {
 					// reset timeout delay on heartbeat message
@@ -1657,7 +1655,7 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			ws.SystemStatusCallback(v.Status)
 		}
 	case WSPong:
-		log.Println("pong | reqid: ", v.ReqID)
+		ws.ErrorLogger.Println("pong | reqid: ", v.ReqID)
 	case WSErrorResp:
 		return fmt.Errorf("error message: %s | reqid: %d", v.ErrorMessage, v.ReqID)
 	default:
@@ -1675,9 +1673,9 @@ func (c *WebSocketClient) reconnect(url string) error {
 		for {
 			err := c.dialKraken(url)
 			if err != nil {
-				log.Printf("encountered error on reconnecting, trying again | %s", err)
+				c.ErrorLogger.Printf("encountered error on reconnecting, trying again | %s\n", err)
 			} else {
-				log.Println("reconnect successful")
+				c.ErrorLogger.Println("reconnect successful")
 				return
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
@@ -1697,10 +1695,10 @@ func (c *WebSocketClient) reconnect(url string) error {
 		err := c.Authenticator.AuthenticateWebSockets()
 		if err != nil {
 			if errors.Is(err, errNoInternetConnection) {
-				log.Printf("encountered error; attempting reauth | %s", err.Error())
+				c.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 				c.Authenticator.reauthenticate()
 			} else if errors.Is(err, err403Forbidden) {
-				log.Printf("encountered error; attempting reauth | %s", err.Error())
+				c.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 				c.Authenticator.reauthenticate()
 			}
 			return fmt.Errorf("error authenticating websockets | %w", err)
@@ -1717,9 +1715,9 @@ func (kc *KrakenClient) reauthenticate() {
 		for {
 			err := kc.AuthenticateWebSockets()
 			if err != nil {
-				log.Printf("encountered error on reauthenticating, trying again | %s", err)
+				kc.ErrorLogger.Printf("encountered error on reauthenticating, trying again | %s\n", err)
 			} else {
-				log.Println("reconnect successful")
+				kc.ErrorLogger.Println("reconnect successful")
 				return
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
@@ -1812,10 +1810,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 				}
 				ws.OrderBookMgr.Mutex.Unlock()
 				if err := ws.OrderBookMgr.OrderBooks[channelName][pair].buildInitialBook(&msg.OrderBook); err != nil {
-					log.Printf("error building initial state of book; sending unsubscribe msg; try subscribing again | %s", err)
+					ws.ErrorLogger.Printf("error building initial state of book; sending unsubscribe msg; try subscribing again | %s\n", err)
 					err := ws.UnsubscribeBook(pair, depth)
 					if err != nil {
-						log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+						ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 					}
 					return
 				}
@@ -1830,10 +1828,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 									for _, ask := range bookUpdate.Asks {
 										newEntry, err := stringEntryToDecimal(&ask)
 										if err != nil {
-											log.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s", err)
+											ws.ErrorLogger.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s\n", err)
 											err := ws.UnsubscribeBook(pair, depth)
 											if err != nil {
-												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+												ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 											}
 										}
 										switch {
@@ -1845,10 +1843,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 											err = ob.updateAskEntry(newEntry, &ob.Asks)
 										}
 										if err != nil {
-											log.Printf("error calling replenish method; stopping goroutine and unsubscribing | %s", err)
+											ws.ErrorLogger.Printf("error calling replenish method; stopping goroutine and unsubscribing | %s\n", err)
 											err := ws.UnsubscribeBook(pair, depth)
 											if err != nil {
-												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+												ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 											}
 										}
 									}
@@ -1857,10 +1855,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 									for _, bid := range bookUpdate.Bids {
 										newEntry, err := stringEntryToDecimal(&bid)
 										if err != nil {
-											log.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s", err)
+											ws.ErrorLogger.Printf("error calling stringEntryToDecimal; stopping goroutine and unsubscribing | %s\n", err)
 											err := ws.UnsubscribeBook(pair, depth)
 											if err != nil {
-												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+												ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 											}
 										}
 										switch {
@@ -1872,10 +1870,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 											err = ob.updateBidEntry(newEntry, &ob.Bids)
 										}
 										if err != nil {
-											log.Printf("error calling replenish/update/delete method; stopping goroutine and unsubscribing | %s", err)
+											ws.ErrorLogger.Printf("error calling replenish/update/delete method; stopping goroutine and unsubscribing | %s\n", err)
 											err := ws.UnsubscribeBook(pair, depth)
 											if err != nil {
-												log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+												ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 											}
 										}
 									}
@@ -1884,18 +1882,18 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 								// Stop go routine and unsubscribe if checksum does not pass
 								checksum, err := strconv.ParseUint(bookUpdate.Checksum, 10, 32)
 								if err != nil {
-									log.Printf("error parsing checksum uint32; stopping goroutine and unsubscribing | %s", err)
+									ws.ErrorLogger.Printf("error parsing checksum uint32; stopping goroutine and unsubscribing | %s\n", err)
 									err := ws.UnsubscribeBook(pair, depth)
 									if err != nil {
-										log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+										ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 									}
 									return
 								}
 								if err := ob.validateChecksum(uint32(checksum)); err != nil {
-									log.Printf("error validating checksum; stopping goroutine and unsubscribing | %s", err)
+									ws.ErrorLogger.Printf("error validating checksum; stopping goroutine and unsubscribing | %s\n", err)
 									err := ws.UnsubscribeBook(pair, depth)
 									if err != nil {
-										log.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s", err)
+										ws.ErrorLogger.Printf("error sending unsubscribe; shut down kraken client and reinitialize | %s\n", err)
 									}
 									return
 								}
@@ -1910,7 +1908,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 					}
 				}()
 			} else {
-				log.Println("unknown data type sent to book callback")
+				ws.ErrorLogger.Println("unknown data type sent to book callback")
 			}
 		}
 	}
@@ -1927,10 +1925,10 @@ func (ws *WebSocketManager) closeAndDeleteBook(ob *InternalOrderBook, pair, chan
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; ok {
 				delete(ws.OrderBookMgr.OrderBooks[channelName], pair)
 			} else {
-				log.Printf("UnsubscribeBook error | channel name %s does not exist in OrderBooks", channelName)
+				ws.ErrorLogger.Printf("UnsubscribeBook error | channel name %s does not exist in OrderBooks\n", channelName)
 			}
 		} else {
-			log.Println("UnsubscribeBook error | OrderBooks is nil")
+			ws.ErrorLogger.Println("UnsubscribeBook error | OrderBooks is nil")
 		}
 		ws.OrderBookMgr.Mutex.Unlock()
 	}
