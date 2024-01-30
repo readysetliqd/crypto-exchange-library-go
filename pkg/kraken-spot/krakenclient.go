@@ -59,6 +59,7 @@ type WebSocketManager struct {
 	SubscriptionMgr      *SubscriptionManager
 	OrderBookMgr         *OrderBookManager
 	TradeLogger          *TradeLogger
+	OpenOrdersMgr        *OpenOrderManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
 	ErrorLogger          *log.Logger
@@ -104,6 +105,15 @@ type TradeLogger struct {
 	wg        sync.WaitGroup
 	ch        chan (map[string]WSOwnTrade)
 	isLogging atomic.Bool
+}
+
+type OpenOrderManager struct {
+	OpenOrders map[string]WSOpenOrder
+	ch         chan (WSOpenOrdersResp)
+	seq        int
+	wg         sync.WaitGroup
+	isTracking atomic.Bool
+	Mutex      sync.RWMutex
 }
 
 type Subscription struct {

@@ -1636,8 +1636,8 @@ type WSOpenOrder struct {
 	QuoteCost           string             `json:"cost"`
 	QuoteFee            string             `json:"fee"`
 	AvgPrice            string             `json:"avg_price"`
-	StopPrice           string             `json:"stopprice"`
-	LimitPrice          string             `json:"limitprice"`
+	TrailingStopPrice   string             `json:"stopprice"`
+	TriggeredLimitPrice string             `json:"limitprice"`
 	Misc                string             `json:"misc"`
 	OrderFlags          string             `json:"oflags"`
 	TimeInForce         string             `json:"timeinforce"`

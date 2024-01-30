@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -26,6 +25,8 @@ import (
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO test if callbacks can be nil and end user can access channels with go routines
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
+// TODO log errors when missing sequence for ownTrades
+// TODO add time check for trade logger to ignore previous trades when SubscribeOwnTrades is called with snapshot
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -953,6 +954,143 @@ func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err erro
 	}
 }
 
+// Starts the open orders manager. Call this method before SubscribeOpenOrders().
+// It will build initial state of all currently open orders and maintain it in
+// memory as new open order update messages come in.
+//
+// # Example Usage:
+//
+//	// Print current state of open orders every 15 seconds
+//	err := kc.SubscribeOpenOrders()
+//	if err != nil...
+//	err := kc.StartOpenOrderManager()
+//	if err != nil...
+//	ticker := time.NewTicker(time.Second * 15)
+//	for range ticker.C {
+//		orders := kc.MapOpenOrders()
+//		log.Println(orders)
+//	}
+func (ws *WebSocketManager) StartOpenOrderManager() error {
+	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+		return fmt.Errorf("OpenOrderManager is already running")
+	} else if ws.OpenOrdersMgr == nil {
+		ws.OpenOrdersMgr = &OpenOrderManager{
+			OpenOrders: make(map[string]WSOpenOrder),
+			ch:         make(chan (WSOpenOrdersResp)),
+			seq:        0,
+		}
+		ws.OpenOrdersMgr.isTracking.Store(true)
+		go ws.startOpenOrderManager()
+	} else if ws.OpenOrdersMgr.isTracking.CompareAndSwap(false, true) {
+		ws.OpenOrdersMgr.ch = make(chan WSOpenOrdersResp)
+		ws.OpenOrdersMgr.seq = 0
+		go ws.startOpenOrderManager()
+	} else {
+		return fmt.Errorf("an error occurred starting OpenOrderManager")
+	}
+
+	return nil
+}
+
+// Helper function meant to be run as a go routine. Starts a loop that reads
+// from ws.OpenOrdersMgr.ch and either builds the initial state of the currently
+// open orders or it updates the state removing and adding orders as necessary
+func (ws *WebSocketManager) startOpenOrderManager() {
+	ws.OpenOrdersMgr.wg.Add(1)
+	defer ws.OpenOrdersMgr.wg.Done()
+
+	for data := range ws.OpenOrdersMgr.ch {
+		if data.Sequence != ws.OpenOrdersMgr.seq+1 {
+			ws.ErrorLogger.Println("improper open orders sequence, shutting down go routine")
+			return
+		} else {
+			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
+			if ws.OpenOrdersMgr.seq == 1 {
+				// Build initial state of open orders
+				for _, order := range data.OpenOrders {
+					for orderID, orderInfo := range order {
+						ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
+					}
+				}
+			} else {
+				// Update state of open orders
+				for _, order := range data.OpenOrders {
+					for orderID, orderInfo := range order {
+						if orderInfo.Status == "pending" {
+							ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
+						} else if orderInfo.Status == "open" {
+							order := ws.OpenOrdersMgr.OpenOrders[orderID]
+							order.Status = "open"
+							ws.OpenOrdersMgr.OpenOrders[orderID] = order
+						} else if orderInfo.Status == "closed" {
+							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
+						} else if orderInfo.Status == "canceled" {
+							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// Stops the internal tracking of current open orders. Closes channel and clears
+// the internal OpenOrders map.
+func (ws *WebSocketManager) StopOpenOrderManager() error {
+	if ws.OpenOrdersMgr == nil {
+		return fmt.Errorf("OpenOrderManager never initialized, call StartOpenOrderManager() method")
+	}
+	if ws.OpenOrdersMgr.isTracking.CompareAndSwap(true, false) {
+		close(ws.OpenOrdersMgr.ch)
+		ws.OpenOrdersMgr.wg.Wait()
+		// clear map
+		ws.OpenOrdersMgr.Mutex.Lock()
+		ws.OpenOrdersMgr.OpenOrders = nil
+		ws.OpenOrdersMgr.Mutex.Unlock()
+		return nil
+	}
+	return fmt.Errorf("OpenOrderManager is already stopped")
+}
+
+// Returns a map of the current state of open orders managed by StartOpenOrderManager().
+func (ws *WebSocketManager) MapOpenOrders() map[string]WSOpenOrder {
+	ws.OpenOrdersMgr.Mutex.RLock()
+	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+	return ws.OpenOrdersMgr.OpenOrders
+}
+
+// Returns a slice of all currently open orders for arg 'pair' sorted ascending
+// by price.
+func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSOpenOrder, error) {
+	var openOrders []map[string]WSOpenOrder
+	ws.OpenOrdersMgr.Mutex.RLock()
+	for id, order := range ws.OpenOrdersMgr.OpenOrders {
+		if order.Description.Pair == pair {
+			newOrder := make(map[string]WSOpenOrder)
+			newOrder[id] = order
+			openOrders = append(openOrders, newOrder)
+		}
+	}
+	ws.OpenOrdersMgr.Mutex.RUnlock()
+	sort.Slice(openOrders, func(i, j int) bool {
+		for id1 := range openOrders[i] {
+			for id2 := range openOrders[j] {
+				dec1, err := decimal.NewFromString(openOrders[i][id1].Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting string to decimal")
+				}
+				dec2, err := decimal.NewFromString(openOrders[j][id2].Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting string to decimal")
+				}
+				return dec1.Cmp(dec2) < 0
+			}
+		}
+		return false
+	})
+	return openOrders, nil
+}
+
 // Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
 // callback function to dictate what to do with incoming data. Accepts none or
 // many functional options args 'options'.
@@ -1554,7 +1692,6 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 						sub.Callback(data)
 						if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
 							ownTrades, ok := data.(WSOwnTradesResp)
-							log.Println("ownTrades:\n", ownTrades)
 							if !ok {
 								ws.ErrorLogger.Println("error asserting data to WSOwnTradesResp")
 							} else {
@@ -1593,6 +1730,15 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
 						sub.Callback(data)
+						if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+							openOrders, ok := data.(WSOpenOrdersResp)
+							if !ok {
+								ws.ErrorLogger.Println("error asserting data to WSOpenOrdersResp")
+							} else {
+								ws.OpenOrdersMgr.ch <- openOrders
+							}
+
+						}
 					}
 				case <-sub.DoneChan:
 					if sub.DoneChanClosed == 0 { // channel is open
