@@ -21,7 +21,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO add OrderManager to keep current state of open trades in memory
 // TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO test if callbacks can be nil and end user can access channels with go routines
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
@@ -826,8 +825,9 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 
 // Starts trade logger which opens (or creates if not exists) file with 'filename'.
 // Appends all incoming trades from Kraken's "ownTrades" channel. Suggested to call
-// this method before SubscribeOwnTrades(). Will log errors to ErrorLogger (defaults
-// to stdout if none is set) and structures a message to log to TradeLogger file.
+// this method before SubscribeOwnTrades(). If errors occur, will log the errors
+// to ErrorLogger (defaults to stdout if none is set) and structures an error
+// message to log to TradeLogger file.
 //
 // Note: Calling SubscribeOwnTrades(callback, options ...) without passing
 // WithoutSnapshot() to 'options' will result in the latest 50 trades in the
@@ -858,7 +858,7 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 		return errors.New("tradeLogger is already running")
 	}
 
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 	if err != nil {
 		return fmt.Errorf("error opening file %s | %w", filename, err)
 	}
@@ -1089,6 +1089,135 @@ func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSO
 		return false
 	})
 	return openOrders, nil
+}
+
+// LogOpenorders creates or opens a file with arg 'filename' and writes the
+// current state of the open orders to the file in json lines format. Accepts
+// one optional boolean arg 'overwrite'. If false, clears old file if it exists
+// and writes new data to file. If true, appends the current data to the old file
+// if it already exists. Defaults to false if no 'overwrite' value is passed.
+//
+// # Example Usage:
+//
+// Example 1: Defers LogOpenOrders on main() return or panic
+//
+//	kc.StartOpenOrderManager()
+//	kc.SubscribeOpenOrders(openOrdersCallback)
+//	defer func() {
+//		err := kc.LogOpenOrders("open_orders.jsonl", true)
+//		if err != nil {
+//			fmt.Println("Error logging orders:", err)
+//		}
+//	}()
+//	defer func() {
+//		if r := recover(); r != nil {
+//			panic(r) // re-throw panic after Order logging
+//		}
+//	}()
+//
+// Example 2: Create channel and call LogOpenOrders() on shutdown signal
+//
+//	kc.StartOpenOrderManager()
+//	kc.SubscribeOpenOrders(openOrdersCallback)
+//	sigs := make(chan os.Signal, 1)
+//	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+//	// Start a goroutine that will perform cleanup when the program is interrupted
+//	go func() {
+//		<-sigs
+//		err := kc.LogOpenOrders("open_orders.jsonl", true)
+//		if err != nil {
+//			fmt.Println("Error logging orders:", err)
+//		}
+//		os.Exit(0)
+//	}()
+func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) error {
+	// Check if OpenOrders manager is valid and running
+	if ws.OpenOrdersMgr == nil || !ws.OpenOrdersMgr.isTracking.Load() {
+		return fmt.Errorf("open orders manager is not currently running, start with StartOpenOrderManager()")
+	}
+
+	// Create or open file
+	var file *os.File
+	var err error
+	if len(overwrite) > 0 {
+		if len(overwrite) > 1 {
+			return fmt.Errorf("too many args passed to ListOpenOrders(). Expected 1 or 2")
+		}
+		if !overwrite[0] {
+			file, err = os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+			if err != nil {
+				return fmt.Errorf("error opening file | %w", err)
+			}
+		} else {
+			file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
+			if err != nil {
+				return fmt.Errorf("error opening file | %w", err)
+			}
+			err = file.Truncate(0)
+			if err != nil {
+				return fmt.Errorf("error truncating file | %w", err)
+			}
+		}
+	} else {
+		file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			return fmt.Errorf("error opening file | %w", err)
+		}
+		err = file.Truncate(0)
+		if err != nil {
+			return fmt.Errorf("error truncating file | %w", err)
+		}
+	}
+	defer file.Close()
+
+	ws.OpenOrdersMgr.Mutex.RLock()
+	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+
+	// Build map of open orders by pair and sorted by price ascending
+	logOrders := make(map[string][]map[string]WSOpenOrder)
+	for orderID, order := range ws.OpenOrdersMgr.OpenOrders {
+		if _, ok := logOrders[order.Description.Pair]; !ok {
+			logOrders[order.Description.Pair] = make([]map[string]WSOpenOrder, 0, 60)
+			newMap := make(map[string]WSOpenOrder)
+			newMap[orderID] = order
+			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], newMap)
+		} else { // pair exists in logOrders
+			// Insert new entry by price ascending
+			i := sort.Search(len(logOrders[order.Description.Pair]), func(i int) bool {
+				var p1 decimal.Decimal
+				var p2 decimal.Decimal
+				for id := range logOrders[order.Description.Pair][i] {
+					p1, err = decimal.NewFromString(logOrders[order.Description.Pair][i][id].Description.Price)
+					if err != nil {
+						ws.ErrorLogger.Println("error converting decimal to string |", err)
+					}
+				}
+				p2, err := decimal.NewFromString(order.Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting decimal to string |", err)
+				}
+				return p1.Cmp(p2) >= 0
+			})
+			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], map[string]WSOpenOrder{})
+			copy(logOrders[order.Description.Pair][i+1:], logOrders[order.Description.Pair][i:])
+			newMap := make(map[string]WSOpenOrder)
+			newMap[orderID] = order
+			logOrders[order.Description.Pair][i] = newMap
+		}
+	}
+	for _, orders := range logOrders {
+		for _, order := range orders {
+			jsonOrder, err := json.Marshal(order)
+			if err != nil {
+				return fmt.Errorf("error marshalling order | %w", err)
+			}
+			_, err = file.WriteString(string(jsonOrder) + "\n")
+			if err != nil {
+				return fmt.Errorf("error writing to file | %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
