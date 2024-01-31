@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -22,10 +21,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO test if callbacks can be nil and end user can access channels with go routines
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
-// TODO log errors when missing sequence for ownTrades
-// TODO add time check for trade logger to ignore previous trades when SubscribeOwnTrades is called with snapshot
+// TODO add state manager
+// TODO add self rate limiter for order placement
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -888,6 +886,11 @@ func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options
 			option.Apply(&subscriptionBuffer)
 		case PrivateReqIDOption:
 			option.Apply(&reqIDBuffer)
+		case SnapshotOption:
+			option.Apply(&subscriptionBuffer)
+			if ws.TradeLogger != nil {
+				ws.TradeLogger.startSeq = 0
+			}
 		}
 	}
 	channelName := "ownTrades"
@@ -1015,21 +1018,18 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders(options ...UnsubscribeOpenOrde
 	return nil
 }
 
-// Starts trade logger which opens (or creates if not exists) file with 'filename'.
-// Appends all incoming trades from Kraken's "ownTrades" channel. Suggested to call
-// this method before SubscribeOwnTrades(). If errors occur, will log the errors
-// to ErrorLogger (defaults to stdout if none is set) and structures an error
-// message to log to TradeLogger file.
+// StartTradeLogger() starts a trade logger which opens, or creates if not exists,
+// a file with 'filename' and writes all incoming trades from an "ownTrades"
+// WebSocket channel subscription in json lines format. Suggested to call this
+// method before SubscribeOwnTrades(). If errors occur, will log the errors
+// to ErrorLogger (defaults to stdout if none is set) also structures the error
+// message and logs it to the TradeLogger file.
 //
-// Note: Calling SubscribeOwnTrades(callback, options ...) without passing
-// WithoutSnapshot() to 'options' will result in the latest 50 trades in the
-// snapshot to be logged to the log file. This can cause duplicate entries if
-// channel is unsubscribed/resubscribed, whether intentionally or due to
-// connection errors.
+// Note: Ignores "snapshot" trades
 //
 // # Example Usage:
 //
-//	err := kc.StartTradeLogger("todays_trades.log")
+//	err := kc.StartTradeLogger("todays_trades.jsonl")
 //	ownTradesCallback := func(ownTradesData interface{}) {
 //		// Don't need to do anything extra here for trades to be logged
 //		log.Println("an executed trade was logged by the logger!")
@@ -1056,9 +1056,12 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 	}
 	ws.Mutex.Lock()
 	ws.TradeLogger = &TradeLogger{
-		file:   file,
-		writer: bufio.NewWriter(file),
-		ch:     make(chan map[string]WSOwnTrade, 100),
+		file:       file,
+		writer:     bufio.NewWriter(file),
+		ch:         make(chan map[string]WSOwnTrade, 100),
+		seqErrorCh: make(chan error),
+		seq:        0,
+		startSeq:   1,
 	}
 	ws.TradeLogger.isLogging.Store(true)
 	ws.Mutex.Unlock()
@@ -1067,20 +1070,25 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 	go func() {
 		defer ws.TradeLogger.wg.Done()
 
-		for trade := range ws.TradeLogger.ch {
-			tradeJson, err := json.Marshal(trade)
-			if err != nil {
-				ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
-				continue
-			}
-			_, err = ws.TradeLogger.writer.WriteString(string(tradeJson) + "\n")
-			if err != nil {
-				ws.handleTradeLoggerError("error writing trade JSON to string", err, trade)
-				continue
-			}
-			err = ws.TradeLogger.writer.Flush()
-			if err != nil {
-				ws.handleTradeLoggerError("error flushing writer", err, trade)
+		for {
+			select {
+			case trade := <-ws.TradeLogger.ch:
+				tradeJson, err := json.Marshal(trade)
+				if err != nil {
+					ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
+					continue
+				}
+				_, err = ws.TradeLogger.writer.WriteString(string(tradeJson) + "\n")
+				if err != nil {
+					ws.handleTradeLoggerError("error writing trade JSON to string", err, trade)
+					continue
+				}
+				err = ws.TradeLogger.writer.Flush()
+				if err != nil {
+					ws.handleTradeLoggerError("error flushing writer", err, trade)
+				}
+			case err := <-ws.TradeLogger.seqErrorCh:
+				ws.handleTradeLoggerError("sequence error", err, nil)
 			}
 		}
 	}()
@@ -1855,8 +1863,14 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 							if !ok {
 								ws.ErrorLogger.Println("error asserting data to WSOwnTradesResp")
 							} else {
-								for _, trade := range ownTrades.OwnTrades {
-									ws.TradeLogger.ch <- trade
+								if ws.TradeLogger.seq+1 != ownTrades.Sequence {
+									ws.TradeLogger.seqErrorCh <- fmt.Errorf("sequence out of order: expected %d but got %d", ws.TradeLogger.seq+1, ownTrades.Sequence)
+								}
+								ws.TradeLogger.seq = ownTrades.Sequence
+								if ownTrades.Sequence > ws.TradeLogger.startSeq {
+									for _, trade := range ownTrades.OwnTrades {
+										ws.TradeLogger.ch <- trade
+									}
 								}
 							}
 						}
@@ -2119,8 +2133,6 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	case WSSubscriptionStatus:
 		switch v.Status {
 		case "subscribed":
-			//DEBUG testing nil callback
-			log.Println(v)
 			if publicChannelNames[v.ChannelName] {
 				if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].ConfirmedChanClosed == 0 {
 					ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].confirmSubscription()

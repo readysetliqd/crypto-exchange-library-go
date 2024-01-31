@@ -100,11 +100,14 @@ type SubscriptionManager struct {
 }
 
 type TradeLogger struct {
-	file      *os.File
-	writer    *bufio.Writer
-	wg        sync.WaitGroup
-	ch        chan (map[string]WSOwnTrade)
-	isLogging atomic.Bool
+	file       *os.File
+	writer     *bufio.Writer
+	wg         sync.WaitGroup
+	ch         chan (map[string]WSOwnTrade)
+	seqErrorCh chan error
+	seq        int
+	startSeq   int
+	isLogging  atomic.Bool
 }
 
 type OpenOrderManager struct {

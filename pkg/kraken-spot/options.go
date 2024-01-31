@@ -1537,6 +1537,7 @@ type OptionType int
 const (
 	SubscriptionOption OptionType = iota
 	PrivateReqIDOption
+	SnapshotOption
 )
 
 type SubscribeOwnTradesOption interface {
@@ -1584,7 +1585,7 @@ func (w *withoutSnapshot) Apply(buffer *bytes.Buffer) {
 }
 
 func (w *withoutSnapshot) Type() OptionType {
-	return SubscriptionOption
+	return SnapshotOption
 }
 
 // Whether to send historical feed data snapshot upon subscription. Defaults to
