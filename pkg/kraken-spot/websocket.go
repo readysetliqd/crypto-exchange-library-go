@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +22,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO add order writer to write all orderIDs opened during program operation in case disconnect
 // TODO test if callbacks can be nil and end user can access channels with go routines
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO log errors when missing sequence for ownTrades
@@ -38,9 +38,10 @@ import (
 // expires within 15 minutes. Strongly recommended to subscribe to at least one
 // private WebSocket channel and leave it open.
 //
-// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
-// crashes or invalid messages being pushed to Kraken's server on the occasions
-// where their system's status is changed. Ensure you have implemented handling
+// CAUTION: Passing nil to arg 'systemStatusCallback' without handling system
+// status changes elsewhere in your program may result in program crashes or
+// invalid messages being pushed to Kraken's server on the occasions where
+// their system's status is changed. Ensure you have implemented handling
 // system status changes on your own or reinitialize the client with a valid
 // systemStatusCallback function
 //
@@ -141,9 +142,10 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 // the connection. If the connection is successful, it sets the SystemStatusCallback
 // function. It returns an error if the connection fails.
 //
-// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
-// crashes or invalid messages being pushed to Kraken's server on the occasions
-// where their system's status is changed. Ensure you have implemented handling
+// CAUTION: Passing nil to arg 'systemStatusCallback' without handling system
+// status changes elsewhere in your program may result in program crashes or
+// invalid messages being pushed to Kraken's server on the occasions where
+// their system's status is changed. Ensure you have implemented handling
 // system status changes on your own or reinitialize the client with a valid
 // systemStatusCallback function
 //
@@ -181,9 +183,10 @@ func (kc *KrakenClient) connectPublic() error {
 // expires within 15 minutes. Strongly recommended to subscribe to at least one
 // private WebSocket channel and leave it open.
 //
-// WARNING: Passing nil to arg 'systemStatusCallback' may result in program
-// crashes or invalid messages being pushed to Kraken's server on the occasions
-// where their system's status is changed. Ensure you have implemented handling
+// CAUTION: Passing nil to arg 'systemStatusCallback' without handling system
+// status changes elsewhere in your program may result in program crashes or
+// invalid messages being pushed to Kraken's server on the occasions where
+// their system's status is changed. Ensure you have implemented handling
 // system status changes on your own or reinitialize the client with a valid
 // systemStatusCallback function
 //
@@ -340,9 +343,14 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 	return nil
 }
 
-// Subscribes to "ticker" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data. Accepts up to one
-// functional options arg 'options' for reqID.
+// Subscribes to "ticker" WebSocket channel for arg 'pair'. May pass a valid
+// function to arg 'callback' to dictate what to do with incoming data to the
+// channel or pass a nil callback if you choose to handle channels manually.
+// Accepts up to one functional options arg 'options' for reqID.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
 //
 // # Functional Options:
 //
@@ -409,9 +417,14 @@ func (ws *WebSocketManager) UnsubscribeTicker(pair string, options ...ReqIDOptio
 
 // Subscribes to "ohlc" WebSocket channel for arg 'pair' and specified 'interval'
 // in minutes. On subscribing, sends last valid closed candle (had at least one
-// trade), irrespective of time. Must pass a valid callback function to dictate
-// what to do with incoming data.  Accepts up to one functional options arg
-// 'options' for reqID.
+// trade), irrespective of time. May pass a valid function to arg 'callback'
+// to dictate what to do with incoming data to the channel or pass a nil callback
+// if you choose to handle channels manually. Accepts up to one functional
+// options arg 'options' for reqID.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
 //
 // # Enum:
 //
@@ -485,9 +498,14 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16, option
 	return nil
 }
 
-// Subscribes to "trade" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data. Accepts up to one
-// functional options arg 'options' for reqID.
+// Subscribes to "trade" WebSocket channel for arg 'pair'. May pass a valid
+// function to arg 'callback' to dictate what to do with incoming data to the
+// channel or pass a nil callback if you choose to handle channels manually.
+// Accepts up to one functional options arg 'options' for reqID.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
 //
 // # Functional Options:
 //
@@ -553,9 +571,14 @@ func (ws *WebSocketManager) UnsubscribeTrade(pair string, options ...ReqIDOption
 	return nil
 }
 
-// Subscribes to "spread" WebSocket channel for arg 'pair'. Must pass a valid
-// callback function to dictate what to do with incoming data.  Accepts up to one
-// functional options arg 'options' for reqID.
+// Subscribes to "spread" WebSocket channel for arg 'pair'. May pass either a
+// valid function to arg 'callback' to dictate what to do with incoming data
+// to the channel or pass a nil callback if you choose to read/handle channel
+// data manually. Accepts up to one functional options arg 'options' for reqID.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
 //
 // # Functional Options:
 //
@@ -628,6 +651,10 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string, options ...ReqIDOptio
 // with incoming data. If nil is passed to 'callback', the WebSocketManager
 // will internally manage and maintain the current state of orderbook for the
 // subscription within the KrakenClient instance.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
 //
 // When nil is passed, access state of the orderbook with the following methods:
 //
@@ -821,6 +848,171 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
 	}
 	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
+}
+
+// Subscribes to "ownTrades" authenticated WebSocket channel. May pass either
+// a valid function to arg 'callback' to dictate what to do with incoming data
+// to the channel or pass a nil callback if you choose to read/handle channel
+// data manually. Accepts none or many functional options args 'options'.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
+//
+// # Functional Options:
+//
+//	// Whether to consolidate order fills by root taker trade(s). If false, all order fills will show separately. Defaults to true if not called.
+//	func WithoutConsolidatedTaker()
+//	// Whether to send historical feed data snapshot upon subscription. Defaults to true if not called.
+//	func WithoutSnapshot()
+//	// Attach optional request ID 'reqID' to request
+//	func SubscribeOwnTradesReqID(reqID string) SubscribeOwnTradesOption
+//
+// # Example Usage:
+//
+//	ownTradesCallback := func(ownTradesData interface{}) {
+//		if msg, ok := ownTradesData.(ks.WSOwnTradesResp); ok {
+//			log.Println(msg)
+//		}
+//	}
+//	err = kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options ...SubscribeOwnTradesOption) error {
+	var subscriptionBuffer bytes.Buffer
+	var reqIDBuffer bytes.Buffer
+	for _, option := range options {
+		switch option.Type() {
+		case SubscriptionOption:
+			option.Apply(&subscriptionBuffer)
+		case PrivateReqIDOption:
+			option.Apply(&reqIDBuffer)
+		}
+	}
+	channelName := "ownTrades"
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
+	err := ws.subscribePrivate(channelName, payload, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribePrivate() method | %w", err)
+	}
+	return nil
+}
+
+// Unsubscribes from "ownTrades" WebSocket channel. Accepts up to one functional
+// options arg 'options' for reqID.
+//
+// # Functional Options:
+//
+//	// Attach optional request ID 'reqID' to request
+//	func UnsubscribeOwnTradesReqID(reqID string) UnsubscribeOwnTradesOption
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeOwnTrades()
+//	if err != nil...
+func (ws *WebSocketManager) UnsubscribeOwnTrades(options ...UnsubscribeOwnTradesOption) error {
+	// Build buffer
+	var buffer bytes.Buffer
+	if len(options) > 0 {
+		if len(options) > 1 {
+			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+		}
+		for _, option := range options {
+			option(&buffer)
+		}
+	}
+	// Build payload and send unsubscribe
+	channelName := "ownTrades"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
+	ws.AuthWebSocketClient.Mutex.Lock()
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
+	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
+	return nil
+}
+
+// Subscribes to "openOrders" authenticated WebSocket channel. May pass either
+// a valid function to arg 'callback' to dictate what to do with incoming data
+// to the channel or pass a nil callback if you choose to read/handle channel
+// data manually. Accepts none or many functional options arg passed to 'options'.
+//
+// CAUTION: Passing both a non-nil callback function and reading the channels
+// manually in your code will result in conflicts reading incoming data. Choose
+// one method or the other.
+//
+// # Functional Options:
+//
+//	// Whether to send rate-limit counter in updates  Defaults to false if not called.
+//	func WithRateCounter() SubscribeOpenOrdersOption
+//	// Attach optional request ID 'reqID' to request
+//	func SubscribeOpenOrdersReqID(reqID string) SubscribeOpenOrdersOption
+//
+// # Example Usage:
+//
+//	openOrdersCallback := func(openOrdersData interface{}) {
+//		if msg, ok := openOrdersData.(ks.WSOpenOrdersResp); ok {
+//			log.Println(msg)
+//		}
+//	}
+//	err = kc.SubscribeOpenOrders(openOrdersCallback)
+//	if err != nil {
+//		log.Println(err)
+//	}
+func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, options ...SubscribeOpenOrdersOption) error {
+	var subscriptionBuffer bytes.Buffer
+	var reqIDBuffer bytes.Buffer
+	for _, option := range options {
+		switch option.Type() {
+		case SubscriptionOption:
+			option.Apply(&subscriptionBuffer)
+		case PrivateReqIDOption:
+			option.Apply(&reqIDBuffer)
+		}
+	}
+	channelName := "openOrders"
+	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
+	err := ws.subscribePrivate(channelName, payload, callback)
+	if err != nil {
+		return fmt.Errorf("error calling subscribeprivate method | %w", err)
+	}
+	return nil
+}
+
+// Unsubscribes from "openOrders" authenticated WebSocket channel. Accepts up
+// to one functional options arg 'options' for reqID.
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeOpenOrders()
+//	if err != nil...
+func (ws *WebSocketManager) UnsubscribeOpenOrders(options ...UnsubscribeOpenOrdersOption) error {
+	// Build buffer
+	var buffer bytes.Buffer
+	if len(options) > 0 {
+		if len(options) > 1 {
+			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+		}
+		for _, option := range options {
+			option(&buffer)
+		}
+	}
+	// Build payload and send unsubscribe
+	channelName := "openOrders"
+	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
+	ws.AuthWebSocketClient.Mutex.Lock()
+	if ws.AuthWebSocketClient.Conn != nil {
+		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		if err != nil {
+			return fmt.Errorf("error writing message to auth client | %w", err)
+		}
+	}
+	ws.AuthWebSocketClient.Mutex.Unlock()
+	return nil
 }
 
 // Starts trade logger which opens (or creates if not exists) file with 'filename'.
@@ -1220,161 +1412,6 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 	return nil
 }
 
-// Subscribes to "ownTrades" authenticated WebSocket channel. Must pass a valid
-// callback function to dictate what to do with incoming data. Accepts none or
-// many functional options args 'options'.
-//
-// # Functional Options:
-//
-//	// Whether to consolidate order fills by root taker trade(s). If false, all order fills will show separately. Defaults to true if not called.
-//	func WithoutConsolidatedTaker()
-//	// Whether to send historical feed data snapshot upon subscription. Defaults to true if not called.
-//	func WithoutSnapshot()
-//	// Attach optional request ID 'reqID' to request
-//	func SubscribeOwnTradesReqID(reqID string) SubscribeOwnTradesOption
-//
-// # Example Usage:
-//
-//	ownTradesCallback := func(ownTradesData interface{}) {
-//		if msg, ok := ownTradesData.(ks.WSOwnTradesResp); ok {
-//			log.Println(msg)
-//		}
-//	}
-//	err = kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
-//	if err != nil {
-//		log.Println(err)
-//	}
-func (ws *WebSocketManager) SubscribeOwnTrades(callback GenericCallback, options ...SubscribeOwnTradesOption) error {
-	var subscriptionBuffer bytes.Buffer
-	var reqIDBuffer bytes.Buffer
-	for _, option := range options {
-		switch option.Type() {
-		case SubscriptionOption:
-			option.Apply(&subscriptionBuffer)
-		case PrivateReqIDOption:
-			option.Apply(&reqIDBuffer)
-		}
-	}
-	channelName := "ownTrades"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
-	err := ws.subscribePrivate(channelName, payload, callback)
-	if err != nil {
-		return fmt.Errorf("error calling subscribePrivate() method | %w", err)
-	}
-	return nil
-}
-
-// Unsubscribes from "ownTrades" WebSocket channel. Accepts up to one functional
-// options arg 'options' for reqID.
-//
-// # Functional Options:
-//
-//	// Attach optional request ID 'reqID' to request
-//	func UnsubscribeOwnTradesReqID(reqID string) UnsubscribeOwnTradesOption
-//
-// # Example Usage:
-//
-//	err := kc.UnsubscribeOwnTrades()
-//	if err != nil...
-func (ws *WebSocketManager) UnsubscribeOwnTrades(options ...UnsubscribeOwnTradesOption) error {
-	// Build buffer
-	var buffer bytes.Buffer
-	if len(options) > 0 {
-		if len(options) > 1 {
-			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
-		}
-		for _, option := range options {
-			option(&buffer)
-		}
-	}
-	// Build payload and send unsubscribe
-	channelName := "ownTrades"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
-	ws.AuthWebSocketClient.Mutex.Lock()
-	if ws.AuthWebSocketClient.Conn != nil {
-		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-		if err != nil {
-			return fmt.Errorf("error writing message to auth client | %w", err)
-		}
-	}
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	return nil
-}
-
-// Subscribes to "openOrders" authenticated WebSocket channel. Must pass a valid
-// callback function to dictate what to do with incoming data. Accepts none or
-// many functional options arg passed to 'options'.
-//
-// # Functional Options:
-//
-//	// Whether to send rate-limit counter in updates  Defaults to false if not called.
-//	func WithRateCounter() SubscribeOpenOrdersOption
-//	// Attach optional request ID 'reqID' to request
-//	func SubscribeOpenOrdersReqID(reqID string) SubscribeOpenOrdersOption
-//
-// # Example Usage:
-//
-//	openOrdersCallback := func(openOrdersData interface{}) {
-//		if msg, ok := openOrdersData.(ks.WSOpenOrdersResp); ok {
-//			log.Println(msg)
-//		}
-//	}
-//	err = kc.SubscribeOpenOrders(openOrdersCallback)
-//	if err != nil {
-//		log.Println(err)
-//	}
-func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, options ...SubscribeOpenOrdersOption) error {
-	var subscriptionBuffer bytes.Buffer
-	var reqIDBuffer bytes.Buffer
-	for _, option := range options {
-		switch option.Type() {
-		case SubscriptionOption:
-			option.Apply(&subscriptionBuffer)
-		case PrivateReqIDOption:
-			option.Apply(&reqIDBuffer)
-		}
-	}
-	channelName := "openOrders"
-	payload := fmt.Sprintf(`{"event": "subscribe", "subscription": {"name": "%s", "token": "%s"%s}%s}`, channelName, ws.WebSocketToken, subscriptionBuffer.String(), reqIDBuffer.String())
-	err := ws.subscribePrivate(channelName, payload, callback)
-	if err != nil {
-		return fmt.Errorf("error calling subscribeprivate method | %w", err)
-	}
-	return nil
-}
-
-// Unsubscribes from "openOrders" authenticated WebSocket channel. Accepts up
-// to one functional options arg 'options' for reqID.
-//
-// # Example Usage:
-//
-//	err := kc.UnsubscribeOpenOrders()
-//	if err != nil...
-func (ws *WebSocketManager) UnsubscribeOpenOrders(options ...UnsubscribeOpenOrdersOption) error {
-	// Build buffer
-	var buffer bytes.Buffer
-	if len(options) > 0 {
-		if len(options) > 1 {
-			return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
-		}
-		for _, option := range options {
-			option(&buffer)
-		}
-	}
-	// Build payload and send unsubscribe
-	channelName := "openOrders"
-	payload := fmt.Sprintf(`{"event": "unsubscribe", "subscription": {"name": "%s", "token": "%s"}%s}`, channelName, ws.WebSocketToken, buffer.String())
-	ws.AuthWebSocketClient.Mutex.Lock()
-	if ws.AuthWebSocketClient.Conn != nil {
-		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
-		if err != nil {
-			return fmt.Errorf("error writing message to auth client | %w", err)
-		}
-	}
-	ws.AuthWebSocketClient.Mutex.Unlock()
-	return nil
-}
-
 // #endregion
 
 // #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s))
@@ -1712,9 +1749,6 @@ func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 // Subscription, sending payload to server, and starting go routine with
 // channels to listen for incoming messages.
 func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, callback GenericCallback) error {
-	if callback == nil {
-		return fmt.Errorf("callback function must not be nil")
-	}
 	if !publicChannelNames[channelName] {
 		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
 	}
@@ -1781,9 +1815,6 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 // channels to listen for incoming messages. Payload must include unexpired
 // WebSocket token.
 func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callback GenericCallback) error {
-	if callback == nil {
-		return fmt.Errorf("callback function must not be nil")
-	}
 	if !privateChannelNames[channelName] {
 		return fmt.Errorf("unknown channel name; check valid depth or interval against enum | %s", channelName)
 	}
@@ -2088,6 +2119,8 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	case WSSubscriptionStatus:
 		switch v.Status {
 		case "subscribed":
+			//DEBUG testing nil callback
+			log.Println(v)
 			if publicChannelNames[v.ChannelName] {
 				if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].ConfirmedChanClosed == 0 {
 					ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].confirmSubscription()
@@ -2237,9 +2270,9 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 		ChannelName:         channelName,
 		Pair:                pair,
 		Callback:            callback,
-		DataChan:            make(chan interface{}),
-		DoneChan:            make(chan struct{}),
-		ConfirmedChan:       make(chan struct{}),
+		DataChan:            make(chan interface{}, 30),
+		DoneChan:            make(chan struct{}, 1),
+		ConfirmedChan:       make(chan struct{}, 1),
 		DataChanClosed:      0,
 		DoneChanClosed:      0,
 		ConfirmedChanClosed: 0,
