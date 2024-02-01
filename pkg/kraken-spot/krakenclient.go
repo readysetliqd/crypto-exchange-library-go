@@ -39,6 +39,7 @@ type KrakenClient struct {
 
 	*APIManager
 	*WebSocketManager
+	*StateManager
 }
 
 // REST API
@@ -117,6 +118,12 @@ type OpenOrderManager struct {
 	wg         sync.WaitGroup
 	isTracking atomic.Bool
 	Mutex      sync.RWMutex
+}
+
+type StateManager struct {
+	states       map[string]State
+	currentState State
+	Mutex        sync.RWMutex
 }
 
 type Subscription struct {

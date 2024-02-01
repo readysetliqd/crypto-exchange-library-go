@@ -24,6 +24,7 @@ import (
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO add state manager
 // TODO add self rate limiter for order placement
+// TODO add StartOrderManager or something and make it so user can use a callback AND have internal order book management
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
