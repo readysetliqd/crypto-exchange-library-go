@@ -3847,11 +3847,39 @@ func (kc *KrakenClient) AuthenticateWebSockets() error {
 	return nil
 }
 
+// StartRESTRateLimiter starts self rate-limiting for general (everything except
+// "order" type) REST API call methods. For this feature to work correctly,
+// StartRESTRateLimiter must be called before any general REST API calls are
+// made.
+//
+// Note: This does not rate limit "trading" endpoint calls (such as AddOrder(),
+// EditOrder(), or CancelOrder()).
+//
+// Note: This feature adds processing and wait overhead so it should not be
+// used if many consecutive general API calls won't be made, or if the
+// application importing this package is performance critical and/or handling
+// rate limiting itself.
+func (kc *KrakenClient) StartRESTRateLimiter() error {
+	if !kc.APIManager.HandleRateLimit.CompareAndSwap(false, true) {
+		return fmt.Errorf("trading rate-limiter was already started")
+	}
+	return nil
+}
+
+// StopRESTRateLimiter stops self rate-limiting for general (everything except
+// "order" type) REST API call methods.
+func (kc *KrakenClient) StopRESTRateLimiter() error {
+	if !kc.APIManager.HandleRateLimit.CompareAndSwap(true, false) {
+		return fmt.Errorf("trading rate-limiter was already stopped or never initialized")
+	}
+	return nil
+}
+
 // #endregion
 
 // #region Unexported KrakenClient helper methods
 
-// Generates a signature for a request to the Kraken API
+// getSignature generates a signature for a request to the Kraken API
 func (kc *KrakenClient) getSignature(urlPath string, values url.Values) string {
 	sha := sha256.New()
 	sha.Write([]byte(values.Get("nonce") + values.Encode()))
@@ -3863,7 +3891,7 @@ func (kc *KrakenClient) getSignature(urlPath string, values url.Values) string {
 	return base64.StdEncoding.EncodeToString(macsum)
 }
 
-// Sends a request to the Kraken API and returns the response
+// doRequest sends a request to the Kraken API and returns the response
 func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Response, error) {
 	signature := kc.getSignature(urlPath, values)
 
@@ -3887,10 +3915,11 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 	return httpResp, nil
 }
 
-// If HandleRateLimit is true, checks rate limit increment won't exceed max
-// counter cap. If it will, waits for counter to decrement before proceeding
+// rateLimitAndIncrement checks rate limit increment won't exceed max counter
+// cap when HandleRateLimit is true; if increment will exceed counter cap,
+// waits for counter to decrement before proceeding.
 func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
-	if kc.APIManager.HandleRateLimit {
+	if kc.APIManager.HandleRateLimit.Load() {
 		kc.APIManager.Mutex.Lock()
 		for kc.APIManager.APICounter+incrementAmount >= kc.APIManager.MaxAPICounter {
 			kc.ErrorLogger.Println("Counter will exceed rate limit. Waiting")
@@ -3899,8 +3928,29 @@ func (kc *KrakenClient) rateLimitAndIncrement(incrementAmount uint8) {
 		if kc.APICounter == 0 {
 			go kc.startAPIRateLimiter()
 		}
-		kc.APICounter += incrementAmount
+		kc.APIManager.APICounter += incrementAmount
 		kc.APIManager.Mutex.Unlock()
+	}
+}
+
+// startAPIRateLimiter is a go routine method with a timer that decays the
+// kc.APIManager.APICounter every second by the amount in kc.APICounterDecay;
+// stops timer and returns when counter hits 0.
+func (kc *KrakenClient) startAPIRateLimiter() {
+	ticker := time.NewTicker(time.Second * time.Duration(kc.APIManager.APICounterDecay))
+	defer ticker.Stop()
+	for range ticker.C {
+		kc.APIManager.Mutex.Lock()
+		if kc.APIManager.APICounter > 0 {
+			kc.APIManager.APICounter -= 1
+			if kc.APIManager.APICounter == 0 {
+				ticker.Stop()
+				kc.APIManager.Mutex.Unlock()
+				return
+			}
+		}
+		kc.APIManager.Mutex.Unlock()
+		kc.APIManager.CounterDecayCond.Broadcast()
 	}
 }
 

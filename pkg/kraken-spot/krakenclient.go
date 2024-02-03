@@ -44,7 +44,7 @@ type KrakenClient struct {
 
 // REST API
 type APIManager struct {
-	HandleRateLimit  bool
+	HandleRateLimit  atomic.Bool
 	APICounter       uint8
 	MaxAPICounter    uint8
 	APICounterDecay  uint8 // seconds per 1 counter decay
@@ -155,13 +155,8 @@ type GenericCallback func(data interface{})
 // TODO remove handleratelimit and docstrings referring to it
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier' but
-// is only used if 'handleRateLimit' is set to "true". Arg 'handleRateLimit' will
-// allow the client to self rate limit for general API calls. This currently has no
-// ability to rate limit Trading endpoint calls (such as AddOrder(), EditOrder(),
-// or CancelOrder()). This feature adds processing overhead so it should be set to
-// "false" if many consecutive general API calls won't be made, or if the application
-// importing this package is either performance critical or handling rate limiting
-// itself.
+// this value is only used if any self rate-limiting features are activated with
+// either StartRESTRateLimiter() or StartTradingRateLimiter().
 //
 // Verification Tiers:
 //
@@ -174,9 +169,7 @@ type GenericCallback func(data interface{})
 // # Enum:
 //
 // 'verificationTier': [1..3]
-//
-// 'handleRateLimit': true, false
-func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRateLimit bool) (*KrakenClient, error) {
+func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenClient, error) {
 	decodedSecret, err := base64.StdEncoding.DecodeString(apiSecret)
 	if err != nil {
 		return nil, err
@@ -195,11 +188,12 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		ErrorLogger: logger,
 	}
 	kc.APIManager = &APIManager{
-		HandleRateLimit:  handleRateLimit,
+		HandleRateLimit:  atomic.Bool{},
 		MaxAPICounter:    maxCounter,
 		APICounterDecay:  decayRate,
 		CounterDecayCond: sync.NewCond(&kc.APIManager.Mutex),
 	}
+	kc.APIManager.HandleRateLimit.Store(false)
 	maxTradingCounter := maxTradingCounterMap[verificationTier]
 	decayTradingRate := decayTradingRateMap[verificationTier]
 	kc.WebSocketManager = &WebSocketManager{
@@ -261,24 +255,4 @@ func (kc *KrakenClient) SetErrorLogger(output io.Writer) *log.Logger {
 		kc.WebSocketManager.AuthWebSocketClient.ErrorLogger = logger
 	}
 	return logger
-}
-
-// A go routine method with a timer that decays kc.APICounter every second by the
-// amount in kc.APICounterDecay. Stops at 0.
-func (kc *KrakenClient) startAPIRateLimiter() {
-	ticker := time.NewTicker(time.Second * time.Duration(kc.APIManager.APICounterDecay))
-	defer ticker.Stop()
-	for range ticker.C {
-		kc.APIManager.Mutex.Lock()
-		if kc.APIManager.APICounter > 0 {
-			kc.APIManager.APICounter -= 1
-			if kc.APIManager.APICounter == 0 {
-				ticker.Stop()
-				kc.APIManager.Mutex.Unlock()
-				return
-			}
-		}
-		kc.APIManager.Mutex.Unlock()
-		kc.APIManager.CounterDecayCond.Broadcast()
-	}
 }
