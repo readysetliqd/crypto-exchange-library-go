@@ -154,7 +154,7 @@ type GenericCallback func(data interface{})
 
 // TODO remove handleratelimit and docstrings referring to it
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
-// to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier' but
+// to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier', but
 // this value is only used if any self rate-limiting features are activated with
 // either StartRESTRateLimiter() or StartTradingRateLimiter().
 //
@@ -188,11 +188,12 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenC
 		ErrorLogger: logger,
 	}
 	kc.APIManager = &APIManager{
-		HandleRateLimit:  atomic.Bool{},
-		MaxAPICounter:    maxCounter,
-		APICounterDecay:  decayRate,
-		CounterDecayCond: sync.NewCond(&kc.APIManager.Mutex),
+		HandleRateLimit: atomic.Bool{},
+		MaxAPICounter:   maxCounter,
+		APICounterDecay: decayRate,
 	}
+	kc.APIManager.CounterDecayCond = sync.NewCond(&kc.APIManager.Mutex)
+
 	kc.APIManager.HandleRateLimit.Store(false)
 	maxTradingCounter := maxTradingCounterMap[verificationTier]
 	decayTradingRate := decayTradingRateMap[verificationTier]

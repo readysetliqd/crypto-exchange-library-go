@@ -23,6 +23,7 @@ import (
 )
 
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
+// TODO implement limit chase with cancel if necessary
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
