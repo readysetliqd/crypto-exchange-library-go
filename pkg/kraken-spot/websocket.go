@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,9 +23,6 @@ import (
 )
 
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
-// TODO add state manager
-// TODO add self rate limiter for order placement
-// TODO add StartOrderManager or something and make it so user can use a callback AND have internal order book management
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -642,14 +640,15 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string, options ...ReqIDOptio
 	return nil
 }
 
-// Subscribes to "book" WebSocket channel for arg 'pair' and specified 'depth'
-// which is number of levels shown for each bids and asks side. On subscribing,
-// the first message received will be the full initial state of the order book.
+// SubscribeBook subscribes to Kraken's "book" WebSocket channel for arg 'pair'
+// and specified 'depth'. Where 'depth' is number of levels shown for each bids
+// and asks side. On subscribing, the first message received will be the full
+// initial state of the order book. Call StartOrderBookManager() method before
+// SubscribeBook to maintain current state of book in memory.
 //
-// Accepts function arg 'callback' in which the end user can decide what to do
-// with incoming data. If nil is passed to 'callback', the WebSocketManager
-// will internally manage and maintain the current state of orderbook for the
-// subscription within the KrakenClient instance.
+// May pass either a valid function to arg 'callback' to dictate what to do with
+// incoming data to the channel or pass a nil callback if you choose to read/handle
+// channel data manually. Accepts none or many functional options args 'options'.
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
@@ -745,12 +744,25 @@ func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback Ge
 	name := "book"
 	channelName := fmt.Sprintf("%s-%v", name, depth)
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}%s}`, pair, name, depth, buffer.String())
-	if callback == nil {
-		callback = ws.bookCallback(channelName, pair, depth)
-	}
-	err = ws.subscribePublic(channelName, payload, pair, callback)
-	if err != nil {
-		return fmt.Errorf("error calling subscribepublic method | %w", err)
+	if ws.OrderBookMgr.isTracking.Load() {
+		if callback == nil {
+			callback = ws.bookCallback(channelName, pair, depth, nil)
+			err = ws.subscribePublic(channelName, payload, pair, callback)
+			if err != nil {
+				return fmt.Errorf("error calling subscribepublic method | %w", err)
+			}
+		} else {
+			callback2 := ws.bookCallback(channelName, pair, depth, callback)
+			err = ws.subscribePublic(channelName, payload, pair, callback2)
+			if err != nil {
+				return fmt.Errorf("error calling subscribepublic method | %w", err)
+			}
+		}
+	} else {
+		err = ws.subscribePublic(channelName, payload, pair, callback)
+		if err != nil {
+			return fmt.Errorf("error calling subscribepublic method | %w", err)
+		}
 	}
 	return nil
 }
@@ -792,19 +804,41 @@ func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16, options .
 	return nil
 }
 
-// Returns a BookState struct which holds pointers to both Bids and Asks slices
-// for current state of book for arg 'pair' and specified 'depth'.
+// StartOrderBookManager changes the flag for ws.OrderBookMgr to signal new
+// SubscribeBook() subscription calls to track the current state of book in memory.
+// Does not apply to already existing subscriptions, unsubscribe and resubscribe
+// as necessary.
+func (ws *WebSocketManager) StartOrderBookManager() error {
+	if !ws.OrderBookMgr.isTracking.CompareAndSwap(false, true) {
+		return fmt.Errorf("OrderBookManager already running")
+	}
+	return nil
+}
+
+// StopOrderBookManager changes the flag for ws.OrderBookMgr to signal new
+// SubscribeBook() subscription calls not to track the current state of book
+// in memory. Does not apply to already existing subscriptions, unsubscribe
+// and resubscribe as necessary.
+func (ws *WebSocketManager) StopOrderBookManager() error {
+	if !ws.OrderBookMgr.isTracking.CompareAndSwap(true, false) {
+		return fmt.Errorf("OrderBookManager already stopped")
+	}
+	return nil
+}
+
+// GetBookState returns a BookState struct which holds pointers to both Bids
+// and Asks slices for current state of book for arg 'pair' and specified 'depth'.
 //
 // Note: This method should only be called when current state of book is being
 // managed by the WebSocketManager within the KrakenClient instance (when
-// SubscribeBook() method was called with a nil 'callback' function). This method
-// will throw an error if the end user is building and maintaining the order
-// book with their own custom callback function passed to 'callback'.
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
 //
 // CAUTION: As this method returns pointers to the Asks and Bids fields, any
 // modification done directly to Asks or Bids will likely result in an error and
 // cause the WebSocketManager to unsubscribe from this channel. If modification
-// to these slices is desired, either make a copy from reference use ListAsks()
+// to these slices is desired, either make a copy from reference or use ListAsks()
 // and ListBids() instead.
 func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, error) {
 	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
@@ -817,15 +851,15 @@ func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, 
 	return ob, nil
 }
 
-// Returns a copy of the Asks slice which holds the current state of the order
+// ListAsks returns a copy of the Asks slice which holds the current state of the order
 // book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
 // for larger lists ('depth').
 //
 // Note: This method should only be called when current state of book is being
 // managed by the WebSocketManager within the KrakenClient instance (when
-// SubscribeBook() method was called with a nil 'callback' function). This method
-// will throw an error if the end user is building and maintaining the order
-// book with their own custom callback function passed to 'callback'.
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
 func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookEntry, error) {
 	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
 		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
@@ -833,15 +867,15 @@ func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookE
 	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks...), nil
 }
 
-// Returns a copy of the Bids slice which holds the current state of the order
+// ListBids returns a copy of the Bids slice which holds the current state of the order
 // book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
 // for larger lists ('depth').
 //
 // Note: This method should only be called when current state of book is being
 // managed by the WebSocketManager within the KrakenClient instance (when
-// SubscribeBook() method was called with a nil 'callback' function). This method
-// will throw an error if the end user is building and maintaining the order
-// book with their own custom callback function passed to 'callback'.
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
 func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error) {
 	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
 		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
@@ -1162,9 +1196,9 @@ func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err erro
 // # Example Usage:
 //
 //	// Print current state of open orders every 15 seconds
-//	err := kc.SubscribeOpenOrders()
-//	if err != nil...
 //	err := kc.StartOpenOrderManager()
+//	if err != nil...
+//	err := kc.SubscribeOpenOrders()
 //	if err != nil...
 //	ticker := time.NewTicker(time.Second * 15)
 //	for range ticker.C {
@@ -1423,7 +1457,7 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 
 // #endregion
 
-// #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s))
+// #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s), Start/StopTradingRateLimiter)
 
 // Sets OrderStatusCallback to the function passed to arg 'orderStatus'. This
 // function determines the behavior of the program when orderStatus type
@@ -1579,6 +1613,7 @@ func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orde
 //	// Sends a post only buy limit order request at price level 42100.20 on Bitcoin for 1.0 BTC. On filling, will open an opposite side sell order at price 44000
 //	err := kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
 func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume, pair string, options ...WSAddOrderOption) error {
+	// Build payload
 	var buffer bytes.Buffer
 	orderType(&buffer)
 	for _, option := range options {
@@ -1586,6 +1621,14 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	}
 	event := "addOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "type": "%s", "volume": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, direction, volume, pair, buffer.String())
+
+	// Determine incrementAmount and rate limit if rate limiting is turned on
+	if ws.TradingRateLimiter.HandleRateLimit.Load() {
+		incrementAmount := int32(1)
+		ws.tradingRateLimit(pair, incrementAmount)
+	}
+
+	// Write message to Kraken
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -1631,12 +1674,54 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 //
 //	kc.WSEditOrder("O26VH7-COEPR-YFYXLK", "XBT/USD", ks.WSNewPrice("21000"), krakenspot.WSNewPostOnly(), krakenspot.WSValidateEditOrder())
 func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditOrderOption) error {
+	// Build payload
 	var buffer bytes.Buffer
 	for _, option := range options {
 		option(&buffer)
 	}
 	event := "editOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "orderid": "%s", "pair": "%s"%s}`, event, ws.WebSocketToken, orderID, pair, buffer.String())
+
+	// Determine incrementAmount and rate limit if rate limiting is turned on
+	if ws.TradingRateLimiter.HandleRateLimit.Load() {
+		var incrementAmount int32
+		if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+			order, ok := ws.OpenOrdersMgr.OpenOrders[orderID]
+			if !ok {
+				return fmt.Errorf("open order with id %s not found", orderID)
+			}
+			openTime, err := strconv.ParseInt(order.OpenTime, 10, 64)
+			if err != nil {
+				return fmt.Errorf("error converting string to int64")
+			}
+			timeNow := time.Now().Unix()
+			timeSince := timeNow - openTime
+			switch {
+			case timeSince < 5:
+				incrementAmount = 6
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 10:
+				incrementAmount = 5
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 15:
+				incrementAmount = 4
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 45:
+				incrementAmount = 2
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 90:
+				incrementAmount = 1
+				ws.tradingRateLimit(pair, incrementAmount)
+			default:
+				// 0 increment amount, do nothing
+			}
+		} else { // OpenOrdersMgr not running, assume the max increment amount
+			incrementAmount = 6
+			ws.tradingRateLimit(pair, incrementAmount)
+		}
+	}
+
+	// Write message to Kraken
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -1655,8 +1740,51 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 //
 //	err := kc.WSCancelOrder("O26VH7-COEPR-YFYXLK")
 func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
+	// Build payload
 	event := "cancelOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": ["%s"]}`, event, ws.WebSocketToken, orderID)
+
+	// Determine incrementAmount and rate limit if rate limiting is turned on
+	if ws.TradingRateLimiter.HandleRateLimit.Load() {
+		var incrementAmount int32
+		if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+			order, ok := ws.OpenOrdersMgr.OpenOrders[orderID]
+			if !ok {
+				return fmt.Errorf("open order with id %s not found", orderID)
+			}
+			pair := order.Description.Pair
+			openTime, err := strconv.ParseInt(order.OpenTime, 10, 64)
+			if err != nil {
+				return fmt.Errorf("error converting string to int64")
+			}
+			timeNow := time.Now().Unix()
+			timeSince := timeNow - openTime
+			switch {
+			case timeSince < 5:
+				incrementAmount = 8
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 10:
+				incrementAmount = 6
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 15:
+				incrementAmount = 5
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 45:
+				incrementAmount = 4
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 90:
+				incrementAmount = 2
+				ws.tradingRateLimit(pair, incrementAmount)
+			case timeSince < 300:
+				incrementAmount = 1
+				ws.tradingRateLimit(pair, incrementAmount)
+			default:
+				// 0 increment amount, do nothing
+			}
+		} // else OpenOrdersMgr not running, cannot determine pair, cannot rate limit
+	}
+
+	// Write message to Kraken
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err := ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -1675,12 +1803,54 @@ func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
 //
 //	err := kc.WSCancelOrder([]string{"O26VH7-COEPR-YFYXLK", "OGTT3Y-C6I3P-X2I6HX"})
 func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
+	// Build payload
 	event := "cancelOrder"
 	ordersJSON, err := json.Marshal(orderIDs)
 	if err != nil {
 		return fmt.Errorf("error marshalling order ids to json | %w", err)
 	}
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": %s}`, event, ws.WebSocketToken, string(ordersJSON))
+
+	// Determine incrementAmount and rate limit if rate limiting is turned on
+	if ws.TradingRateLimiter.HandleRateLimit.Load() {
+		if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+			pairsIncrementAmounts := make(map[string]int32)
+			for _, orderID := range orderIDs {
+				order, ok := ws.OpenOrdersMgr.OpenOrders[orderID]
+				if !ok {
+					return fmt.Errorf("open order with id %s not found", orderID)
+				}
+				pair := order.Description.Pair
+				openTime, err := strconv.ParseInt(order.OpenTime, 10, 64)
+				if err != nil {
+					return fmt.Errorf("error converting string to int64")
+				}
+				timeNow := time.Now().Unix()
+				timeSince := timeNow - openTime
+				switch {
+				case timeSince < 5:
+					pairsIncrementAmounts[pair] += 8
+				case timeSince < 10:
+					pairsIncrementAmounts[pair] += 6
+				case timeSince < 15:
+					pairsIncrementAmounts[pair] += 5
+				case timeSince < 45:
+					pairsIncrementAmounts[pair] += 4
+				case timeSince < 90:
+					pairsIncrementAmounts[pair] += 2
+				case timeSince < 300:
+					pairsIncrementAmounts[pair] += 1
+				default:
+					// 0 increment amount, do nothing
+				}
+			}
+			for pair, incrementAmount := range pairsIncrementAmounts {
+				ws.tradingRateLimit(pair, incrementAmount)
+			}
+		} // else OpenOrdersMgr not running, cannot determine pair, cannot rate limit
+	}
+
+	// Write message to Kraken
 	ws.AuthWebSocketClient.Mutex.Lock()
 	if ws.AuthWebSocketClient.Conn != nil {
 		err = ws.AuthWebSocketClient.Conn.WriteMessage(websocket.TextMessage, []byte(payload))
@@ -1699,6 +1869,7 @@ func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
 //
 //	err := kc.WSCancelAllOrders()
 func (ws *WebSocketManager) WSCancelAllOrders() error {
+	// Build payload
 	event := "cancelAll"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s"}`, event, ws.WebSocketToken)
 	ws.AuthWebSocketClient.Mutex.Lock()
@@ -1737,6 +1908,7 @@ func (ws *WebSocketManager) WSCancelAllOrders() error {
 //
 // kc.WSCancelAllOrdersAfter("60")
 func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
+	// Build payload
 	event := "cancelAllOrdersAfter"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "timeout": %s}`, event, ws.WebSocketToken, timeout)
 	ws.AuthWebSocketClient.Mutex.Lock()
@@ -1750,9 +1922,74 @@ func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 	return nil
 }
 
+// StartTradingRateLimiter starts self rate-limiting for "order" type WebSocket
+// methods. The "order" type methods include WSAddOrder(), WSEditOrder(),
+// WSCancelOrder(), and WSCancelOrders(). Must have an active subscription to
+// "openOrders" channel with SubscribeOpenOrders() before sending any orders
+// for self rate-limiting logic to work correctly.
+//
+// Note: It's recommended to start open orders internal management with
+// StartOpenOrderManager() before subscribing to "openOrders" channel. If open
+// order manager is not started before subscribing, rate-limiter for edit
+// orders will default to assuming a max incremement penalty and cancel orders
+// will simply skip rate-limiting logic. Accepts one or none optional arg
+// passed to 'maxCounterBufferPercent' which is a percent of the total max
+// counter for your verification tier that will act as a buffer to attempt to
+// avoid exceeding max counter rate when multiple order methods for the same
+// pair are called consecutively and race to pass the rate-limit check.
+//
+// Note: Activating self rate-limiting may add significant processing overhead
+// and waits and only attempts to prevent hitting the max. It is likely better to
+// implement rate-limiting yourself and/or design your strategy not to approach
+// rate-limits.
+//
+// # Enum:
+//
+// 'maxCounterBufferPercent' - [0..99]
+//
+// # Example Usage:
+//
+// Note: error assignment and handling omitted throughout
+//
+//	// Creates new client, connects, starts required features for rate-limiting
+//	// with a 20% buffer, subscribes, and sends an order
+//	kc := NewKrakenClient(apikey, apisecret, 2)
+//	kc.ConnectPrivate()
+//	kc.StartOpenOrderManager()
+//	kc.StartTradingRateLimiter(20)
+//	kc.SubscribeOpenOrders(openOrdersCallback)
+//	// send orders as needed
+//	kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
+//	// etc...
+func (ws *WebSocketManager) StartTradingRateLimiter(maxCounterBufferPercent ...uint8) error {
+	if len(maxCounterBufferPercent) > 1 {
+		return fmt.Errorf("too many args passed, expected 0 or 1")
+	}
+	if len(maxCounterBufferPercent) == 1 {
+		if maxCounterBufferPercent[0] > 99 {
+			return fmt.Errorf("invalid maxCounterBufferPercent")
+		}
+		ws.TradingRateLimiter.MaxCounter = ws.TradingRateLimiter.UnbufferedMaxCounter * (100 - int32(maxCounterBufferPercent[0])) / 100
+	}
+	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(false, true) {
+		return fmt.Errorf("trading rate-limiter was already initialized")
+	}
+
+	return nil
+}
+
+// StopTradingRateLimiter stops self rate-limiting for "order" type WebSocket
+// methods.
+func (ws *WebSocketManager) StopTradingRateLimiter() error {
+	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(true, false) {
+		return fmt.Errorf("trading rate-limiter was already stopped or never initialized")
+	}
+	return nil
+}
+
 // #endregion
 
-// #region *WebSocketManager helper methods (subscribe, readers, routers, and connections)
+// #region *WebSocketManager helper methods (subscribe, readers, routers, trading rate-limiter)
 
 // Helper method for public data subscribe methods to handle initializing
 // Subscription, sending payload to server, and starting go routine with
@@ -1771,6 +2008,15 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	ws.SubscriptionMgr.Mutex.Lock()
 	if ws.SubscriptionMgr.PublicSubscriptions[channelName] == nil {
 		ws.SubscriptionMgr.PublicSubscriptions[channelName] = make(map[string]*Subscription)
+	}
+	// HARDCODED WORKAROUND to avoid panic from racing when back to back Unsubscribe()
+	// and Subscribe() methods are called for the same channel
+	// if channel/pair already exists, unlock mutex and sleep lets Unsubscribe()
+	// processes finish deleting pair from book before creating a new one
+	if _, ok := ws.SubscriptionMgr.PublicSubscriptions[channelName][pair]; ok {
+		ws.SubscriptionMgr.Mutex.Unlock()
+		time.Sleep(time.Millisecond * 300)
+		ws.SubscriptionMgr.Mutex.Lock()
 	}
 	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
 	ws.SubscriptionMgr.Mutex.Unlock()
@@ -1793,7 +2039,9 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 			select {
 			case data := <-sub.DataChan:
 				if sub.DataChanClosed == 0 { // channel is open
-					sub.Callback(data)
+					if sub.Callback != nil {
+						sub.Callback(data)
+					}
 				}
 			case <-sub.DoneChan:
 				if sub.DoneChanClosed == 0 { // channel is open
@@ -1858,7 +2106,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
-						sub.Callback(data)
+						if sub.Callback != nil {
+							sub.Callback(data)
+						}
 						if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
 							ownTrades, ok := data.(WSOwnTradesResp)
 							if !ok {
@@ -1904,15 +2154,32 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
-						sub.Callback(data)
+						if sub.Callback != nil {
+							sub.Callback(data)
+						}
+						openOrders, ok := data.(WSOpenOrdersResp)
+						if !ok {
+							ws.ErrorLogger.Println("error asserting data to WSOpenOrdersResp")
+						}
 						if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
-							openOrders, ok := data.(WSOpenOrdersResp)
-							if !ok {
-								ws.ErrorLogger.Println("error asserting data to WSOpenOrdersResp")
-							} else {
-								ws.OpenOrdersMgr.ch <- openOrders
+							ws.OpenOrdersMgr.ch <- openOrders
+						}
+						if ws.TradingRateLimiter.HandleRateLimit.Load() {
+							for _, orders := range openOrders.OpenOrders {
+								for _, order := range orders {
+									if _, ok := ws.TradingRateLimiter.Counters[order.Description.Pair]; ok {
+										if ws.TradingRateLimiter.Counters[order.Description.Pair].Load() == 0 {
+											ws.TradingRateLimiter.Counters[order.Description.Pair].Store(int32(order.RateCount))
+											go ws.startTradeRateLimiter(order.Description.Pair)
+										} else {
+											ws.TradingRateLimiter.Counters[order.Description.Pair].Store(int32(order.RateCount))
+										}
+									} else { // first time pair has had an order sent
+										ws.TradingRateLimiter.Counters[order.Description.Pair] = new(atomic.Int32)
+										ws.TradingRateLimiter.CounterDecayConds[order.Description.Pair] = sync.NewCond(&sync.Mutex{})
+									}
+								}
 							}
-
 						}
 					}
 				case <-sub.DoneChan:
@@ -2171,6 +2438,44 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	return nil
 }
 
+// tradingRateLimit is a helper method that waits for the counter to decrement
+// if adding 'incrementAmount' to the counter for specified 'pair' would go over
+// the max counter amount for the user's verification tier.
+func (ws *WebSocketManager) tradingRateLimit(pair string, incrementAmount int32) {
+	if _, ok := ws.TradingRateLimiter.Counters[pair]; ok {
+		for ws.TradingRateLimiter.Counters[pair].Load()+incrementAmount >= ws.TradingRateLimiter.MaxCounter {
+			ws.ErrorLogger.Println("Counter will exceed rate limit. Waiting")
+			ws.TradingRateLimiter.CounterDecayConds[pair].Wait()
+		}
+	}
+}
+
+// startTradeRateLimiter is a go routine method which starts a timer that decays
+// kc.APICounter every second by the amount in kc.APICounterDecay. Stops at 0.
+func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
+	ticker := time.NewTicker(time.Millisecond * time.Duration(ws.TradingRateLimiter.CounterDecay))
+	defer ticker.Stop()
+	for range ticker.C {
+		test := atomic.Int32{}
+		test.Load()
+		ws.TradingRateLimiter.Mutex.Lock()
+		if ws.TradingRateLimiter.Counters[pair].Load() > 0 {
+			ws.TradingRateLimiter.Counters[pair].Add(-1)
+			if ws.TradingRateLimiter.Counters[pair].Load() == 0 {
+				ticker.Stop()
+				ws.TradingRateLimiter.Mutex.Unlock()
+				return
+			}
+		}
+		ws.TradingRateLimiter.Mutex.Unlock()
+		ws.TradingRateLimiter.CounterDecayConds[pair].Broadcast()
+	}
+}
+
+// #endregion
+
+// #region Connection helper methods (dialKraken, reconnect, reauthenticate)
+
 // Attempts reconnect with dialKraken() method. Retries 5 times instantly then
 // scales back to attempt reconnect once every ~8 seconds.
 func (c *WebSocketClient) reconnect(url string) error {
@@ -2296,10 +2601,13 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 
 // #region *InternalOrderBook helper methods (bookCallback, unsubscribe, close, buildInitial, checksum, update)
 
-func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16) func(data interface{}) {
+func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16, callback GenericCallback) func(data interface{}) {
 	return func(data interface{}) {
 		if msg, ok := data.(WSBookUpdateResp); ok { // data is book update message
 			ws.OrderBookMgr.OrderBooks[channelName][pair].DataChan <- msg
+			if callback != nil {
+				callback(msg)
+			}
 		} else if msg, ok := data.(WSBookSnapshotResp); ok { // data is book snapshot
 			// make book-depth map if not exists
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; !ok {
@@ -2330,6 +2638,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 						select {
 						case bookUpdate := <-ob.DataChan:
 							if ob.DataChanClosed == 0 {
+
 								ob.Mutex.Lock()
 								if len(bookUpdate.Asks) > 0 {
 									for _, ask := range bookUpdate.Asks {
@@ -2414,6 +2723,9 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16)
 						}
 					}
 				}()
+				if callback != nil {
+					callback(msg)
+				}
 			} else {
 				ws.ErrorLogger.Println("unknown data type sent to book callback")
 			}

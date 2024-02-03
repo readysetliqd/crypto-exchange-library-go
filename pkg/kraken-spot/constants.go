@@ -72,12 +72,18 @@ const (
 // #region API rate limiter constants
 
 const (
-	tier1DecayRate  uint8 = 3 // seconds per 1 counter decay
-	tier2DecayRate  uint8 = 2 // seconds per 1 counter decay
-	tier3DecayRate  uint8 = 1 // seconds per 1 counter decay
-	tier1MaxCounter uint8 = 15
-	tier2MaxCounter uint8 = 20
-	tier3MaxCounter uint8 = 20
+	tier1DecayRate         uint8  = 3 // seconds per 1 counter decay
+	tier2DecayRate         uint8  = 2 // seconds per 1 counter decay
+	tier3DecayRate         uint8  = 1 // seconds per 1 counter decay
+	tier1MaxCounter        uint8  = 15
+	tier2MaxCounter        uint8  = 20
+	tier3MaxCounter        uint8  = 20
+	tier1TradingDecayRate  uint16 = 1000 // milliseconds per 1 counter decay
+	tier2TradingDecayRate  uint16 = 428  // milliseconds per 1 counter decay
+	tier3TradingDecayRate  uint16 = 267  // milliseconds per 1 counter decay
+	tier1TradingMaxCounter uint8  = 60
+	tier2TradingMaxCounter uint8  = 125
+	tier3TradingMaxCounter uint8  = 180
 )
 
 var decayRateMap = map[uint8]uint8{
@@ -90,6 +96,18 @@ var maxCounterMap = map[uint8]uint8{
 	1: tier1MaxCounter,
 	2: tier2MaxCounter,
 	3: tier3MaxCounter,
+}
+
+var decayTradingRateMap = map[uint8]uint16{
+	1: tier1TradingDecayRate,
+	2: tier2TradingDecayRate,
+	3: tier3TradingDecayRate,
+}
+
+var maxTradingCounterMap = map[uint8]uint8{
+	1: tier1TradingMaxCounter,
+	2: tier2TradingMaxCounter,
+	3: tier3TradingMaxCounter,
 }
 
 // #endregion

@@ -47,7 +47,7 @@ type APIManager struct {
 	HandleRateLimit  bool
 	APICounter       uint8
 	MaxAPICounter    uint8
-	APICounterDecay  uint8
+	APICounterDecay  uint8 // seconds per 1 counter decay
 	CounterDecayCond *sync.Cond
 	Mutex            sync.Mutex
 }
@@ -61,6 +61,7 @@ type WebSocketManager struct {
 	OrderBookMgr         *OrderBookManager
 	TradeLogger          *TradeLogger
 	OpenOrdersMgr        *OpenOrderManager
+	TradingRateLimiter   *TradingRateLimiter
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
 	ErrorLogger          *log.Logger
@@ -90,6 +91,7 @@ type Authenticator interface {
 // Internal order book management
 type OrderBookManager struct {
 	OrderBooks map[string]map[string]*InternalOrderBook
+	isTracking atomic.Bool
 	Mutex      sync.RWMutex
 }
 
@@ -126,6 +128,16 @@ type StateManager struct {
 	Mutex        sync.RWMutex
 }
 
+type TradingRateLimiter struct {
+	HandleRateLimit      atomic.Bool
+	Counters             map[string]*atomic.Int32
+	UnbufferedMaxCounter int32
+	MaxCounter           int32
+	CounterDecay         uint16 // milliseconds per 1 counter decay
+	CounterDecayConds    map[string]*sync.Cond
+	Mutex                sync.Mutex
+}
+
 type Subscription struct {
 	ChannelName         string
 	Pair                string
@@ -140,6 +152,7 @@ type Subscription struct {
 
 type GenericCallback func(data interface{})
 
+// TODO remove handleratelimit and docstrings referring to it
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier' but
 // is only used if 'handleRateLimit' is set to "true". Arg 'handleRateLimit' will
@@ -182,10 +195,13 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		ErrorLogger: logger,
 	}
 	kc.APIManager = &APIManager{
-		HandleRateLimit: handleRateLimit,
-		MaxAPICounter:   maxCounter,
-		APICounterDecay: decayRate,
+		HandleRateLimit:  handleRateLimit,
+		MaxAPICounter:    maxCounter,
+		APICounterDecay:  decayRate,
+		CounterDecayCond: sync.NewCond(&kc.APIManager.Mutex),
 	}
+	maxTradingCounter := maxTradingCounterMap[verificationTier]
+	decayTradingRate := decayTradingRateMap[verificationTier]
 	kc.WebSocketManager = &WebSocketManager{
 		SubscriptionMgr: &SubscriptionManager{
 			PublicSubscriptions:  make(map[string]map[string]*Subscription),
@@ -193,13 +209,20 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, handleRat
 		},
 		OrderBookMgr: &OrderBookManager{
 			OrderBooks: make(map[string]map[string]*InternalOrderBook),
+			isTracking: atomic.Bool{},
+		},
+		TradingRateLimiter: &TradingRateLimiter{
+			Counters:             make(map[string]*atomic.Int32),
+			UnbufferedMaxCounter: int32(maxTradingCounter),
+			MaxCounter:           int32(maxTradingCounter),
+			CounterDecay:         decayTradingRate,
+			HandleRateLimit:      atomic.Bool{},
 		},
 		ErrorLogger: logger,
 	}
-	if handleRateLimit {
-		go kc.startRateLimiter()
-		kc.APIManager.CounterDecayCond = sync.NewCond(&kc.APIManager.Mutex)
-	}
+	kc.OrderBookMgr.isTracking.Store(false)
+	kc.TradingRateLimiter.HandleRateLimit.Store(false)
+
 	return kc, nil
 }
 
@@ -242,18 +265,20 @@ func (kc *KrakenClient) SetErrorLogger(output io.Writer) *log.Logger {
 
 // A go routine method with a timer that decays kc.APICounter every second by the
 // amount in kc.APICounterDecay. Stops at 0.
-func (kc *KrakenClient) startRateLimiter() {
-	ticker := time.NewTicker(time.Second * time.Duration(kc.APICounterDecay))
+func (kc *KrakenClient) startAPIRateLimiter() {
+	ticker := time.NewTicker(time.Second * time.Duration(kc.APIManager.APICounterDecay))
 	defer ticker.Stop()
 	for range ticker.C {
 		kc.APIManager.Mutex.Lock()
-		if kc.APICounter > 0 {
-			kc.APICounter -= 1
-			if kc.APICounter == 0 {
+		if kc.APIManager.APICounter > 0 {
+			kc.APIManager.APICounter -= 1
+			if kc.APIManager.APICounter == 0 {
 				ticker.Stop()
+				kc.APIManager.Mutex.Unlock()
+				return
 			}
 		}
 		kc.APIManager.Mutex.Unlock()
-		kc.CounterDecayCond.Broadcast()
+		kc.APIManager.CounterDecayCond.Broadcast()
 	}
 }
