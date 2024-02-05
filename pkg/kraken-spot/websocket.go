@@ -24,6 +24,10 @@ import (
 
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO implement limit chase with cancel if necessary
+// TODO add some broadcasting for limit chase partial fills and finish fill
+// TODO add trading rate limit to REST API calls
+// TODO avoid panic when GetBookState and List Bids are called without StartOrderBookManager probably just put a check in there and return error
+// TODO add some wait group or some blocking mechanism for all subscription methods
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -1090,6 +1094,7 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 	if err != nil {
 		return fmt.Errorf("error opening file %s | %w", filename, err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
 	ws.Mutex.Lock()
 	ws.TradeLogger = &TradeLogger{
 		file:       file,
@@ -1098,17 +1103,24 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 		seqErrorCh: make(chan error),
 		seq:        0,
 		startSeq:   1,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	ws.TradeLogger.isLogging.Store(true)
 	ws.Mutex.Unlock()
 	ws.TradeLogger.wg.Add(1)
 
-	go func() {
+	go func(ctx context.Context) {
 		defer ws.TradeLogger.wg.Done()
 
 		for {
 			select {
-			case trade := <-ws.TradeLogger.ch:
+			case <-ctx.Done():
+				return
+			case trade, ok := <-ws.TradeLogger.ch:
+				if !ok {
+					return
+				}
 				tradeJson, err := json.Marshal(trade)
 				if err != nil {
 					ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
@@ -1123,11 +1135,14 @@ func (ws *WebSocketManager) StartTradeLogger(filename string) error {
 				if err != nil {
 					ws.handleTradeLoggerError("error flushing writer", err, trade)
 				}
-			case err := <-ws.TradeLogger.seqErrorCh:
+			case err, ok := <-ws.TradeLogger.seqErrorCh:
+				if !ok {
+					return
+				}
 				ws.handleTradeLoggerError("sequence error", err, nil)
 			}
 		}
-	}()
+	}(ctx)
 
 	return nil
 }
@@ -1163,7 +1178,9 @@ func (ws *WebSocketManager) StopTradeLogger() error {
 		return fmt.Errorf("trade logger never initialized, call StartTradeLogger() method")
 	}
 	if ws.TradeLogger.isLogging.CompareAndSwap(true, false) {
+		ws.TradeLogger.cancel()
 		close(ws.TradeLogger.ch)
+		close(ws.TradeLogger.seqErrorCh)
 		ws.TradeLogger.wg.Wait()
 		return ws.TradeLogger.file.Close()
 	}
@@ -2432,7 +2449,7 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	case WSPong:
 		ws.ErrorLogger.Println("pong | reqid: ", v.ReqID)
 	case WSErrorResp:
-		return fmt.Errorf("error message: %s | reqid: %d", v.ErrorMessage, v.ReqID)
+		ws.ErrorLogger.Printf("error message: %s | reqid: %d\n", v.ErrorMessage, v.ReqID)
 	default:
 		return fmt.Errorf("cannot route unknown msg type | %s", msg.Event)
 	}

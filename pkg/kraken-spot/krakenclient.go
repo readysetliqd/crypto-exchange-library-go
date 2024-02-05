@@ -110,6 +110,8 @@ type TradeLogger struct {
 	seqErrorCh chan error
 	seq        int
 	startSeq   int
+	ctx        context.Context
+	cancel     context.CancelFunc
 	isLogging  atomic.Bool
 }
 
