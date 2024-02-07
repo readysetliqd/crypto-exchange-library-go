@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/shopspring/decimal"
 )
@@ -1756,11 +1755,12 @@ type LimitChase struct {
 	partiallyFilled bool
 	fullyFilled     bool
 	dataChan        chan interface{}
-	dataChanOpen    atomic.Bool
+	dataChanOpen    bool
 	fillCallback    func(*LimitChaseFill)
 	closeCallback   func()
 	ctx             context.Context
 	cancel          context.CancelFunc
+	mutex           sync.RWMutex
 }
 
 type LimitChaseFill struct {

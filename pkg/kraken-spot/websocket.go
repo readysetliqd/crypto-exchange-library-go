@@ -2084,14 +2084,13 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 		pending:         true,
 		partiallyFilled: false,
 		fullyFilled:     false,
-		dataChan:        make(chan interface{}),
-		dataChanOpen:    atomic.Bool{},
+		dataChan:        make(chan interface{}, 5),
+		dataChanOpen:    true,
 		fillCallback:    fillCallback,
 		closeCallback:   closeCallback,
 		ctx:             ctx,
 		cancel:          cancel,
 	}
-	newLC.dataChanOpen.Store(true)
 	ws.LimitChaseMgr.Mutex.Lock()
 	ws.LimitChaseMgr.LimitChaseOrders[userRef] = newLC
 	ws.LimitChaseMgr.Mutex.Unlock()
@@ -2114,6 +2113,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 						for _, order := range openOrder {
 							switch {
 							case order.Status == "pending":
+								newLC.mutex.Lock()
 								newLC.pending = false
 								orderPrice, err := decimal.NewFromString(order.Description.Price)
 								if err != nil { // not sure we need to cancel&quit here, what situations does kraken send invalid price on a pending order?
@@ -2121,6 +2121,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 								}
 								newLC.partiallyFilled = false
 								newLC.orderPrice = orderPrice
+								newLC.mutex.Unlock()
 							case order.Status == "canceled" && order.CancelReason != "Order replaced":
 								// This case should also be true when closeAndDeleteLimitChase cancels a partially filled order
 								bookState, err := ws.GetBookState(pair, depth)
@@ -2129,17 +2130,21 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 									ws.closeAndDeleteLimitChase(newLC, userRef)
 									return
 								}
+								newLC.mutex.Lock()
 								newLC.pending = true
+								var newPrice decimal.Decimal
 								switch dir {
 								case 1: // "buy"
-									bestBid := (*bookState.Bids)[0].Price
-									ws.WSAddOrder(WSLimit(bestBid.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+									newPrice = (*bookState.Bids)[0].Price
 								case -1: // "sell"
-									bestAsk := (*bookState.Asks)[0].Price
-									ws.WSAddOrder(WSLimit(bestAsk.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+									newPrice = (*bookState.Asks)[0].Price
 								}
+								ws.WSAddOrder(WSLimit(newPrice.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+								newLC.mutex.Unlock()
 							case order.Status == "closed":
+								newLC.mutex.Lock()
 								newLC.fullyFilled = true
+								newLC.mutex.Unlock()
 								ws.closeAndDeleteLimitChase(newLC, userRef)
 								return
 							case order.VolumeExecuted != "":
@@ -2148,6 +2153,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 									ws.ErrorLogger.Println("error converting volume executed to decimal | ", order.VolumeExecuted)
 								}
 								if volExec.Cmp(decimal.Zero) != 0 {
+									newLC.mutex.Lock()
 									filledVol := volExec.Sub(newLC.filledVol)
 									newLC.filledVol = volExec
 									newLC.remainingVol = newLC.startingVolume.Sub(newLC.filledVol)
@@ -2158,6 +2164,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 									if newLC.remainingVol.Cmp(decimal.Zero) == 0 {
 										newLC.fullyFilled = true
 										// order fully filled; call fillCallback and close limit-chase
+										newLC.mutex.Unlock()
 										ws.closeAndDeleteLimitChase(newLC, userRef)
 										return
 									} else { // order partially filled, call fillCallback
@@ -2165,6 +2172,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 										if newLC.fillCallback != nil {
 											newLC.fillCallback(fill)
 										}
+										newLC.mutex.Unlock()
 									}
 								}
 							}
@@ -2188,6 +2196,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 					case -1: // "sell"
 						newPrice = (*bookState.Asks)[0].Price
 					}
+					newLC.mutex.Lock()
 					if newLC.orderPrice.Cmp(newPrice) != 0 && !newLC.fullyFilled {
 						err = ws.updateLimitChase(newLC, newPrice, pair)
 						if err != nil {
@@ -2196,10 +2205,12 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 							if err != nil {
 								ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
 							}
+							newLC.mutex.Unlock()
 							ws.closeAndDeleteLimitChase(newLC, userRef)
 							return
 						}
 					}
+					newLC.mutex.Unlock()
 				case WSAddOrderResp:
 					if msg.Status != "ok" {
 						if strings.Contains(msg.ErrorMessage, "Invalid arguments:volume") {
@@ -2276,8 +2287,10 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 // safety by using a mutex lock when deleting the LimitChase order from the map.
 func (ws *WebSocketManager) closeAndDeleteLimitChase(lc *LimitChase, userRef int32) {
 	ws.LimitChaseMgr.Mutex.Lock()
-	lc.dataChanOpen.Store(false)
+	lc.mutex.Lock()
+	lc.dataChanOpen = false
 	close(lc.dataChan)
+	lc.mutex.Unlock()
 	delete(ws.LimitChaseMgr.LimitChaseOrders, userRef)
 	ws.LimitChaseMgr.Mutex.Unlock()
 	if lc.closeCallback != nil {
@@ -2321,12 +2334,12 @@ func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.De
 // ensures thread safety by using a mutex lock when accessing the map. It returns
 // an error if a LimitChase order with the given 'userRef' doesn't exist.
 func (ws *WebSocketManager) CancelLimitChase(userRef int32) error {
-	ws.LimitChaseMgr.Mutex.Lock()
+	ws.LimitChaseMgr.Mutex.RLock()
 	if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[userRef]; !ok {
-		ws.LimitChaseMgr.Mutex.Unlock()
+		ws.LimitChaseMgr.Mutex.RUnlock()
 		return fmt.Errorf("limit chase order with userRef %v doesn't exist", userRef)
 	} else {
-		ws.LimitChaseMgr.Mutex.Unlock()
+		ws.LimitChaseMgr.Mutex.RUnlock()
 		lc.cancel()
 	}
 	return nil
@@ -2754,9 +2767,11 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
 			for _, order := range ws.LimitChaseMgr.LimitChaseOrders {
 				if order.pair == v.Pair {
-					if order.dataChanOpen.Load() {
+					order.mutex.RLock()
+					if order.dataChanOpen {
 						order.dataChan <- v
 					}
+					order.mutex.RUnlock()
 				}
 			}
 		}
@@ -2790,9 +2805,11 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 			for _, orderMap := range v.OpenOrders {
 				for _, order := range orderMap {
 					if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(order.UserRef)]; ok {
-						if lc.dataChanOpen.Load() {
+						lc.mutex.RLock()
+						if lc.dataChanOpen {
 							lc.dataChan <- v
 						}
+						lc.mutex.RUnlock()
 					}
 				}
 			}
@@ -2814,9 +2831,11 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		ws.LimitChaseMgr.Mutex.RLock()
 		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
-				if lc.dataChanOpen.Load() {
+				lc.mutex.RLock()
+				if lc.dataChanOpen {
 					lc.dataChan <- v
 				}
+				lc.mutex.RUnlock()
 			}
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
@@ -2828,9 +2847,11 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		ws.LimitChaseMgr.Mutex.RLock()
 		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
-				if lc.dataChanOpen.Load() {
+				lc.mutex.RLock()
+				if lc.dataChanOpen {
 					lc.dataChan <- v
 				}
+				lc.mutex.RUnlock()
 			}
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
@@ -2842,9 +2863,11 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		ws.LimitChaseMgr.Mutex.RLock()
 		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
-				if lc.dataChanOpen.Load() {
+				lc.mutex.RLock()
+				if lc.dataChanOpen {
 					lc.dataChan <- v
 				}
+				lc.mutex.RUnlock()
 			}
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
