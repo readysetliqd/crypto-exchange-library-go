@@ -22,9 +22,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// TODO fix checksum orderbook not working on other coins besides bitcoin
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
-// TODO implement limit chase with cancel if necessary
-// TODO add some broadcasting for limit chase partial fills and finish fill
 // TODO add trading rate limit to REST API calls
 // TODO avoid panic when GetBookState and List Bids are called without StartOrderBookManager probably just put a check in there and return error
 // TODO add some wait group or some blocking mechanism for all subscription methods
@@ -1631,6 +1630,10 @@ func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orde
 //	// Sends a post only buy limit order request at price level 42100.20 on Bitcoin for 1.0 BTC. On filling, will open an opposite side sell order at price 44000
 //	err := kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
 func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume, pair string, options ...WSAddOrderOption) error {
+	if _, ok := validDirection[direction]; !ok {
+		return fmt.Errorf("invalid arg '%s' passed to 'direction'; expected \"buy\" or \"sell\"", direction)
+	}
+
 	// Build payload
 	var buffer bytes.Buffer
 	orderType(&buffer)
@@ -1705,7 +1708,7 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 		var incrementAmount int32
 		if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
 			order, ok := ws.OpenOrdersMgr.OpenOrders[orderID]
-			if !ok {
+			if !ok { // TODO check if its a userref, make sure theres only one
 				return fmt.Errorf("open order with id %s not found", orderID)
 			}
 			openTime, err := strconv.ParseInt(order.OpenTime, 10, 64)
@@ -1937,6 +1940,395 @@ func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 		}
 	}
 	ws.AuthWebSocketClient.Mutex.Unlock()
+	return nil
+}
+
+// WSLimitChase gets top of book prices and places a post-only limit order on the
+// exchange, and then it manages the order by editing or cancel and replacing
+// as necessary (if the order is partially filled) when the top of book level
+// changes.
+//
+// This method first retrieves top of book price for the given arg passed to
+// 'pair' and places an order in the given 'direction' ("buy" or "sell") for
+// the specified quantity/size passed to 'volume'. This method requires a
+// unique user reference ID passed to 'userRef' that is not used for any other
+// open orders whether made by this package or otherwise. This method requires
+// internal management of orderbooks (use StartOrderBookManager()) a
+// pre-existing active WebSocket subscription to the private "openOrders"
+// channel, and a subscription to a public "book" channel for the given 'pair'.
+//
+// Depth for the "book" channel can be any valid depth, but it is recommended
+// to have only one depth subscribed per 'pair'. Larger depths will incur more
+// unnecessary processing.
+//
+// The 'fillCallBack' arg is a custom function where the end user can dictate
+// what to do when a fill (partial or full) happens. This arg can be nil. The
+// 'closeCallback' is the same, but gets called whenever the limit chase order
+// ends whether it be closed due to order fully filled, errors encountered, or
+// otherwise.
+//
+// # Enums:
+//
+// 'direction' - "buy", "sell"
+//
+// 'volume' - positive number value expressed as a string in quote currency. Must be
+// above minimum size for 'pair' and have correct decimals. Use GetTradeablePairsInfo(pair)
+// for 'pair' specific details
+//
+// 'pair' - valid tradeable pair and format for websocket. Use ListWebsocketNames()
+// to get a slice of possible tradeable pairs
+//
+// 'userRef' - unique identifier not used for any other order. Will not return
+// immediately if 'userRef' is not unique, will place initial order and then
+// cancel both the limit-chase order and all other orders with the same 'userRef'
+// and return with error.
+//
+// # Example Usage:
+//
+// Error handling omitted throughout
+//
+//	// Typical client initialization and subscribe required channels
+//	direction := "buy"
+//	oppDirection := "sell"
+//	krakenPair := "XBT/USD"
+//	liquidExchangePair := "BTCUSDT"
+//	depth := uint16(10)
+//	volume := "0.0001"
+//	userRef := 10010032
+//	kc, err := krakenspot.NewKrakenClient(apiKey, apiSecret, 2)
+//	err = kc.StartOrderBookManager()
+//	subscriptionsDone := make(chan bool)
+//	systemStatusCallback := func(status string) {
+//		if status == "online" {
+//			err = kc.SubscribeBook(krakenPair, depth, nil)
+//			err = kc.SubscribeOpenOrders(nil)
+//			close(subscriptionsDone)
+//		} else { // system not online
+//			close(subscriptionsDone)
+//			return
+//		}
+//	}
+//	err = kc.Connect(systemStatusCallback)
+//	<-subscriptionsDone
+//	limitChaseClosed := make(chan bool)
+//	fillCallback := func(lcFill *krakenspot.LimitChaseFill) {
+//		bc.MarketOrderOnLiquidExchange(oppDirection, lcFill.FilledVol.String(), liquidExchangePair)
+//	}
+//	closeCallback := func() {
+//		log.Println("limit-chase order closed")
+//		close(limitChaseClosed)
+//	}
+//	kc.WSLimitChase(direction, volume, krakenPair, userRef, fillCallback, closeCallback)
+//	<-limitChaseClosed
+//	return
+func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef int32, fillCallback func(*LimitChaseFill), closeCallback func()) error {
+	// Validate inputs and convert 'volume' to decimal 'direction' to int
+	dir, ok := validDirection[direction]
+	if !ok {
+		return fmt.Errorf("invalid arg '%s' passed to 'direction'; expected \"buy\" or \"sell\"", direction)
+	}
+	ws.LimitChaseMgr.Mutex.RLock()
+	if _, ok := ws.LimitChaseMgr.LimitChaseOrders[userRef]; ok {
+		ws.LimitChaseMgr.Mutex.RUnlock()
+		return fmt.Errorf("unique userRef required; limit chase order with userRef %v already exists", userRef)
+	}
+	ws.LimitChaseMgr.Mutex.RUnlock()
+	decVol, err := decimal.NewFromString(volume)
+	if err != nil {
+		return fmt.Errorf("error converting volume to decimal")
+	}
+
+	// Check required subscriptions exist
+	if !ws.OrderBookMgr.isTracking.Load() {
+		return fmt.Errorf("must use StartOrderBookManager() before subscribing to book")
+	}
+	ws.SubscriptionMgr.Mutex.RLock()
+	depth := uint16(10)
+	if _, ok := ws.SubscriptionMgr.PublicSubscriptions["book-10"][pair]; !ok {
+		bookSubscribed := false
+		for book := range ws.SubscriptionMgr.PublicSubscriptions {
+			if _, ok := ws.SubscriptionMgr.PublicSubscriptions[book][pair]; ok {
+				_, depthCut, _ := strings.Cut(book, "-")
+				depth64, err := strconv.ParseUint(depthCut, 10, 16)
+				if err != nil {
+					ws.SubscriptionMgr.Mutex.RUnlock()
+					return fmt.Errorf("error parsing uint")
+				}
+				depth = uint16(depth64)
+				bookSubscribed = true
+				break
+			}
+		}
+		if !bookSubscribed {
+			ws.SubscriptionMgr.Mutex.RUnlock()
+			return fmt.Errorf("no active book subscription for pair \"%s\"", pair)
+		}
+	}
+	if _, ok := ws.SubscriptionMgr.PrivateSubscriptions["openOrders"]; !ok {
+		ws.SubscriptionMgr.Mutex.RUnlock()
+		return fmt.Errorf("no active \"openOrders\" subscription")
+	}
+	ws.SubscriptionMgr.Mutex.RUnlock()
+
+	// Initialize new LimitChase and add to LimitChaseOrders map
+	ctx, cancel := context.WithCancel(context.Background())
+	newLC := &LimitChase{
+		userRef:         userRef,
+		userRefStr:      fmt.Sprintf("%v", userRef),
+		pair:            pair,
+		direction:       dir,
+		startingVolume:  decVol,
+		remainingVol:    decVol,
+		filledVol:       decimal.Zero,
+		orderPrice:      decimal.Zero,
+		pending:         true,
+		partiallyFilled: false,
+		fullyFilled:     false,
+		dataChan:        make(chan interface{}),
+		dataChanOpen:    atomic.Bool{},
+		fillCallback:    fillCallback,
+		closeCallback:   closeCallback,
+		ctx:             ctx,
+		cancel:          cancel,
+	}
+	newLC.dataChanOpen.Store(true)
+	ws.LimitChaseMgr.Mutex.Lock()
+	ws.LimitChaseMgr.LimitChaseOrders[userRef] = newLC
+	ws.LimitChaseMgr.Mutex.Unlock()
+
+	// start go routine to listen for fills and book updates
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				err = ws.WSCancelOrder(newLC.userRefStr)
+				if err != nil {
+					ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+				}
+				ws.closeAndDeleteLimitChase(newLC, userRef)
+				return
+			case data := <-newLC.dataChan:
+				switch msg := data.(type) {
+				case WSOpenOrdersResp:
+					for _, openOrder := range msg.OpenOrders {
+						for _, order := range openOrder {
+							switch {
+							case order.Status == "pending":
+								newLC.pending = false
+								orderPrice, err := decimal.NewFromString(order.Description.Price)
+								if err != nil { // not sure we need to cancel&quit here, what situations does kraken send invalid price on a pending order?
+									ws.ErrorLogger.Println("error encountered during limit chase | error converting string to decimal; cancelling and closing |", err)
+								}
+								newLC.partiallyFilled = false
+								newLC.orderPrice = orderPrice
+							case order.Status == "canceled" && order.CancelReason != "Order replaced":
+								// This case should also be true when closeAndDeleteLimitChase cancels a partially filled order
+								bookState, err := ws.GetBookState(pair, depth)
+								if err != nil {
+									ws.ErrorLogger.Println("error encountered during limit chase | error getting book state on order cancelled; shutting down, restart limit chase if desired")
+									ws.closeAndDeleteLimitChase(newLC, userRef)
+									return
+								}
+								newLC.pending = true
+								switch dir {
+								case 1: // "buy"
+									bestBid := (*bookState.Bids)[0].Price
+									ws.WSAddOrder(WSLimit(bestBid.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+								case -1: // "sell"
+									bestAsk := (*bookState.Asks)[0].Price
+									ws.WSAddOrder(WSLimit(bestAsk.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+								}
+							case order.Status == "closed":
+								newLC.fullyFilled = true
+								ws.closeAndDeleteLimitChase(newLC, userRef)
+								return
+							case order.VolumeExecuted != "":
+								volExec, err := decimal.NewFromString(order.VolumeExecuted)
+								if err != nil { // not sure we need to cancel&quit here, what situations does kraken send VolumeExecuted on an order?
+									ws.ErrorLogger.Println("error converting volume executed to decimal | ", order.VolumeExecuted)
+								}
+								if volExec.Cmp(decimal.Zero) != 0 {
+									filledVol := volExec.Sub(newLC.filledVol)
+									newLC.filledVol = volExec
+									newLC.remainingVol = newLC.startingVolume.Sub(newLC.filledVol)
+									fill := &LimitChaseFill{
+										FilledVol:    filledVol,
+										RemainingVol: newLC.remainingVol,
+									}
+									if newLC.remainingVol.Cmp(decimal.Zero) == 0 {
+										newLC.fullyFilled = true
+										// order fully filled; call fillCallback and close limit-chase
+										ws.closeAndDeleteLimitChase(newLC, userRef)
+										return
+									} else { // order partially filled, call fillCallback
+										newLC.partiallyFilled = true
+										if newLC.fillCallback != nil {
+											newLC.fillCallback(fill)
+										}
+									}
+								}
+							}
+						}
+					}
+				case WSBookUpdateResp:
+					bookState, err := ws.GetBookState(pair, depth)
+					if err != nil {
+						ws.ErrorLogger.Println("error encountered during limit chase | error getting book state; cancelling order and closing")
+						err = ws.WSCancelOrder(newLC.userRefStr)
+						if err != nil {
+							ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+						}
+						ws.closeAndDeleteLimitChase(newLC, userRef)
+						return
+					}
+					var newPrice decimal.Decimal
+					switch dir {
+					case 1: // "buy"
+						newPrice = (*bookState.Bids)[0].Price
+					case -1: // "sell"
+						newPrice = (*bookState.Asks)[0].Price
+					}
+					if newLC.orderPrice.Cmp(newPrice) != 0 && !newLC.fullyFilled {
+						err = ws.updateLimitChase(newLC, newPrice, pair)
+						if err != nil {
+							ws.ErrorLogger.Println("error encountered during limit chase | error updating price; cancelling order and closing")
+							err = ws.WSCancelOrder(newLC.userRefStr)
+							if err != nil {
+								ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+							}
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						}
+					}
+				case WSAddOrderResp:
+					if msg.Status != "ok" {
+						if strings.Contains(msg.ErrorMessage, "Invalid arguments:volume") {
+							// remaining volume less than min order size; or invalid volume closing
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						} else if strings.Contains(msg.ErrorMessage, "Currency pair not supported") {
+							// invalid tradeable pair passed to 'pair'; closing
+							ws.ErrorLogger.Println("error encountered during limit chase | invalid arg passed to 'pair':", pair)
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						} else if strings.Contains(msg.ErrorMessage, "Invalid price") {
+							// invalid price passed, this should never happen; closing
+							ws.ErrorLogger.Println("error encountered during limit chase | unexpected invalid price passed in limit chase", msg)
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						}
+					}
+				case WSEditOrderResp:
+					if msg.Status != "ok" {
+						if strings.Contains(msg.ErrorMessage, "Userref linked with multiple orders") {
+							// non-unique userref, cancels all orders with userref including the limit-chase; close
+							ws.ErrorLogger.Println("error encountered during limit chase | non-unique id passed to 'userRef'; cancelling all orders with userRef", newLC.userRefStr)
+							err := ws.WSCancelOrder(newLC.userRefStr)
+							if err != nil {
+								ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+							}
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						} else if strings.Contains(msg.ErrorMessage, "Unknown order") {
+							// Order no longer exists OR pending flag checks are not working correctly
+							ws.ErrorLogger.Println("error encountered during limit chase | order was not found for editing, order may have been cancelled by another process; closing limit-chase")
+							ws.closeAndDeleteLimitChase(newLC, userRef)
+							return
+						}
+					}
+				case WSCancelOrderResp:
+					if strings.Contains(msg.ErrorMessage, "Unknown order") {
+						// Order no longer exists OR pending flag checks are not working correctly
+						ws.ErrorLogger.Println("error encountered during limit chase | order was not found for cancelling, order may have been cancelled by another process; closing limit-chase")
+						ws.closeAndDeleteLimitChase(newLC, userRef)
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// get top of book price and send initial order
+	bookState, err := ws.GetBookState(pair, depth)
+	if err != nil {
+		ws.closeAndDeleteLimitChase(newLC, userRef)
+		return fmt.Errorf("error encountered during limit chase | error getting book state; closing | %w", err)
+	}
+	var topOfBook decimal.Decimal
+	switch dir {
+	case 1: // "buy"
+		topOfBook = (*bookState.Bids)[0].Price
+	case -1: // "sell"
+		topOfBook = (*bookState.Asks)[0].Price
+	}
+	err = ws.WSAddOrder(WSLimit(topOfBook.String()), direction, newLC.startingVolume.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+	if err != nil {
+		ws.closeAndDeleteLimitChase(newLC, userRef)
+		return fmt.Errorf("error encountered during limit chase | error sending first order | %w", err)
+	}
+	return nil
+}
+
+// closeAndDeleteLimitChase is a helper method to safely close the data channel
+// of a LimitChase order, remove it from the LimitChaseOrders map, and call the
+// closeCallback if one was provided on LimitChase creation. It takes a pointer
+// to a LimitChase struct and a userRef as arguments. The method ensures thread
+// safety by using a mutex lock when deleting the LimitChase order from the map.
+func (ws *WebSocketManager) closeAndDeleteLimitChase(lc *LimitChase, userRef int32) {
+	ws.LimitChaseMgr.Mutex.Lock()
+	lc.dataChanOpen.Store(false)
+	close(lc.dataChan)
+	delete(ws.LimitChaseMgr.LimitChaseOrders, userRef)
+	ws.LimitChaseMgr.Mutex.Unlock()
+	if lc.closeCallback != nil {
+		lc.closeCallback()
+	}
+}
+
+// updateLimitChase updates the state of a LimitChase order based on the new top
+// of book price and sends either an WSEditOrder with the newPrice or a
+// WSCancelOrder if the LimitChase has been partially filled. It takes a pointer
+// to a LimitChase struct, a new price, and a pair as arguments. If the
+// LimitChase order is not pending and not partially filled, it sends an edit
+// order request to the server. If the LimitChase order is partially filled,
+// it cancels the existing order and updates the starting volume. The method
+// returns an error if there's an issue with sending the edit or cancel order
+// request to the server.
+func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.Decimal, pair string) error {
+	if !lc.pending {
+		if !lc.partiallyFilled {
+			lc.pending = true
+			err := ws.WSEditOrder(lc.userRefStr, pair, WSNewPostOnly(), WSNewPrice(newPrice.String()), WSEditOrderReqID(lc.userRefStr), WSNewUserRef(lc.userRefStr))
+			if err != nil {
+				return fmt.Errorf("error calling WSEditOrder | %w", err)
+			}
+		} else {
+			lc.pending = true
+			lc.partiallyFilled = false
+			lc.startingVolume = lc.remainingVol
+			lc.filledVol = decimal.Zero
+			err := ws.WSCancelOrder(lc.userRefStr)
+			if err != nil {
+				return fmt.Errorf("error calling WSCancelOrder | %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+// CancelLimitChase cancels a LimitChase order with the same user reference ID
+// passed to 'userRef' and removes it from the LimitChaseOrders map. The method
+// ensures thread safety by using a mutex lock when accessing the map. It returns
+// an error if a LimitChase order with the given 'userRef' doesn't exist.
+func (ws *WebSocketManager) CancelLimitChase(userRef int32) error {
+	ws.LimitChaseMgr.Mutex.Lock()
+	if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[userRef]; !ok {
+		ws.LimitChaseMgr.Mutex.Unlock()
+		return fmt.Errorf("limit chase order with userRef %v doesn't exist", userRef)
+	} else {
+		ws.LimitChaseMgr.Mutex.Unlock()
+		lc.cancel()
+	}
 	return nil
 }
 
@@ -2357,6 +2749,18 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
 		}
+		// limit chase orders, send to appropriate channels if limit chase exists
+		ws.LimitChaseMgr.Mutex.RLock()
+		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
+			for _, order := range ws.LimitChaseMgr.LimitChaseOrders {
+				if order.pair == v.Pair {
+					if order.dataChanOpen.Load() {
+						order.dataChan <- v
+					}
+				}
+			}
+		}
+		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSBookSnapshotResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
@@ -2380,6 +2784,20 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 		if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChanClosed == 0 {
 			ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChan <- v
 		}
+		// Limit-chase orders; send to appropriate channel if limit chase exists
+		ws.LimitChaseMgr.Mutex.RLock()
+		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
+			for _, orderMap := range v.OpenOrders {
+				for _, order := range orderMap {
+					if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(order.UserRef)]; ok {
+						if lc.dataChanOpen.Load() {
+							lc.dataChan <- v
+						}
+					}
+				}
+			}
+		}
+		ws.LimitChaseMgr.Mutex.RUnlock()
 	}
 	return nil
 }
@@ -2392,14 +2810,44 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		if ws.OrderStatusCallback != nil {
 			ws.OrderStatusCallback(v)
 		}
+		// send to appropriate limit chase if exists
+		ws.LimitChaseMgr.Mutex.RLock()
+		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
+			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
+				if lc.dataChanOpen.Load() {
+					lc.dataChan <- v
+				}
+			}
+		}
+		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSEditOrderResp:
 		if ws.OrderStatusCallback != nil {
 			ws.OrderStatusCallback(v)
 		}
+		// send to appropriate limit chase if exists
+		ws.LimitChaseMgr.Mutex.RLock()
+		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
+			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
+				if lc.dataChanOpen.Load() {
+					lc.dataChan <- v
+				}
+			}
+		}
+		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelOrderResp:
 		if ws.OrderStatusCallback != nil {
 			ws.OrderStatusCallback(v)
 		}
+		// send to appropriate limit chase if exists
+		ws.LimitChaseMgr.Mutex.RLock()
+		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
+			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
+				if lc.dataChanOpen.Load() {
+					lc.dataChan <- v
+				}
+			}
+		}
+		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelAllResp:
 		if ws.OrderStatusCallback != nil {
 			ws.OrderStatusCallback(v)
@@ -2656,8 +3104,10 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 						select {
 						case bookUpdate := <-ob.DataChan:
 							if ob.DataChanClosed == 0 {
-
 								ob.Mutex.Lock()
+								//DEBUG
+								ws.ErrorLogger.Println(ob)
+								ws.ErrorLogger.Println(bookUpdate)
 								if len(bookUpdate.Asks) > 0 {
 									for _, ask := range bookUpdate.Asks {
 										newEntry, err := stringEntryToDecimal(&ask)
@@ -2874,7 +3324,7 @@ func (ob *InternalOrderBook) validateChecksum(msgChecksum uint32) error {
 	}
 	ob.Mutex.RUnlock()
 	if checksum := crc32.ChecksumIEEE(buffer.Bytes()); checksum != msgChecksum {
-		return fmt.Errorf("invalid checksum")
+		return fmt.Errorf("invalid checksum | got: %v expected: %v\n orderbook: %v", checksum, msgChecksum, ob)
 	}
 	return nil
 }

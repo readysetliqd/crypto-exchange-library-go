@@ -62,6 +62,7 @@ type WebSocketManager struct {
 	TradeLogger          *TradeLogger
 	OpenOrdersMgr        *OpenOrderManager
 	TradingRateLimiter   *TradingRateLimiter
+	LimitChaseMgr        *LimitChaseManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
 	ErrorLogger          *log.Logger
@@ -140,6 +141,11 @@ type TradingRateLimiter struct {
 	Mutex                sync.Mutex
 }
 
+type LimitChaseManager struct {
+	LimitChaseOrders map[int32]*LimitChase
+	Mutex            sync.RWMutex
+}
+
 type Subscription struct {
 	ChannelName         string
 	Pair                string
@@ -216,6 +222,9 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenC
 			HandleRateLimit:      atomic.Bool{},
 		},
 		ErrorLogger: logger,
+		LimitChaseMgr: &LimitChaseManager{
+			LimitChaseOrders: make(map[int32]*LimitChase),
+		},
 	}
 	kc.OrderBookMgr.isTracking.Store(false)
 	kc.TradingRateLimiter.HandleRateLimit.Store(false)

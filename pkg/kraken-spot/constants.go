@@ -61,6 +61,11 @@ var generalMessageEvents = map[string]bool{
 	"error":              true,
 }
 
+var validDirection = map[string]int8{
+	"buy":  1,
+	"sell": -1,
+}
+
 // #endregion
 
 const (

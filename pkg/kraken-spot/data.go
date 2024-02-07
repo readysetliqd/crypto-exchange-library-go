@@ -1,12 +1,14 @@
 package krakenspot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/shopspring/decimal"
 )
@@ -1733,6 +1735,35 @@ type WSCancelAllAfterResp struct {
 	CurrentTime  string `json:"currentTime"`
 	TriggerTime  string `json:"triggerTime"`
 	ErrorMessage string `json:"errorMessage"`
+}
+
+// #endregion
+
+// #region Limit Chase data structs
+
+type LimitChase struct {
+	userRef         int32
+	userRefStr      string
+	pair            string
+	direction       int8
+	startingVolume  decimal.Decimal
+	remainingVol    decimal.Decimal
+	filledVol       decimal.Decimal
+	orderPrice      decimal.Decimal
+	pending         bool
+	partiallyFilled bool
+	fullyFilled     bool
+	dataChan        chan interface{}
+	dataChanOpen    atomic.Bool
+	fillCallback    func(*LimitChaseFill)
+	closeCallback   func()
+	ctx             context.Context
+	cancel          context.CancelFunc
+}
+
+type LimitChaseFill struct {
+	FilledVol    decimal.Decimal
+	RemainingVol decimal.Decimal
 }
 
 // #endregion
