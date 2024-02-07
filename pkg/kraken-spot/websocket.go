@@ -3105,9 +3105,6 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 						case bookUpdate := <-ob.DataChan:
 							if ob.DataChanClosed == 0 {
 								ob.Mutex.Lock()
-								//DEBUG
-								ws.ErrorLogger.Println(ob)
-								ws.ErrorLogger.Println(bookUpdate)
 								if len(bookUpdate.Asks) > 0 {
 									for _, ask := range bookUpdate.Asks {
 										newEntry, err := stringEntryToDecimal(&ask)
@@ -3309,17 +3306,17 @@ func (ob *InternalOrderBook) validateChecksum(msgChecksum uint32) error {
 	ob.Mutex.RLock()
 	// write to buffer from asks
 	for i := 0; i < 10; i++ {
-		price := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Price.StringFixed(5), ".", ""), "0")
+		price := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Price.StringFixed(ob.PriceDecimals), ".", ""), "0")
 		buffer.WriteString(price)
-		volume := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Volume.StringFixed(8), ".", ""), "0")
+		volume := strings.TrimLeft(strings.ReplaceAll(ob.Asks[i].Volume.StringFixed(ob.VolumeDecimals), ".", ""), "0")
 		buffer.WriteString(volume)
 	}
 
 	// write to buffer from bids
 	for i := 0; i < 10; i++ {
-		price := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Price.StringFixed(5), ".", ""), "0")
+		price := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Price.StringFixed(ob.PriceDecimals), ".", ""), "0")
 		buffer.WriteString(price)
-		volume := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Volume.StringFixed(8), ".", ""), "0")
+		volume := strings.TrimLeft(strings.ReplaceAll(ob.Bids[i].Volume.StringFixed(ob.VolumeDecimals), ".", ""), "0")
 		buffer.WriteString(volume)
 	}
 	ob.Mutex.RUnlock()
@@ -3350,6 +3347,10 @@ func (ob *InternalOrderBook) buildInitialBook(msg *WSOrderBookSnapshot) error {
 	capacity := len(msg.Bids)
 	ob.Bids = make([]InternalBookEntry, capacity)
 	ob.Asks = make([]InternalBookEntry, capacity)
+	_, priceDecStr, _ := strings.Cut(msg.Bids[0].Price, ".")
+	_, volumeDecStr, _ := strings.Cut(msg.Bids[0].Volume, ".")
+	ob.PriceDecimals = int32(len(priceDecStr))
+	ob.VolumeDecimals = int32(len(volumeDecStr))
 	for i, bid := range msg.Bids {
 		newBid, err := stringEntryToDecimal(&bid)
 		if err != nil {

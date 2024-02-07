@@ -1676,6 +1676,8 @@ type InternalOrderBook struct {
 	DoneChan       chan struct{}
 	DataChanClosed int32
 	DoneChanClosed int32
+	PriceDecimals  int32
+	VolumeDecimals int32
 	Mutex          sync.RWMutex
 }
 
