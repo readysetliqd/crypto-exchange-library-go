@@ -22,7 +22,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO fix checksum orderbook not working on other coins besides bitcoin
+// TODO add some wait group or something to check all subscriptions done
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO add trading rate limit to REST API calls
 // TODO avoid panic when GetBookState and List Bids are called without StartOrderBookManager probably just put a check in there and return error
@@ -2161,6 +2161,9 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 										FilledVol:    filledVol,
 										RemainingVol: newLC.remainingVol,
 									}
+									if newLC.fillCallback != nil {
+										newLC.fillCallback(fill)
+									}
 									if newLC.remainingVol.Cmp(decimal.Zero) == 0 {
 										newLC.fullyFilled = true
 										// order fully filled; call fillCallback and close limit-chase
@@ -2169,9 +2172,6 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 										return
 									} else { // order partially filled, call fillCallback
 										newLC.partiallyFilled = true
-										if newLC.fillCallback != nil {
-											newLC.fillCallback(fill)
-										}
 										newLC.mutex.Unlock()
 									}
 								}
