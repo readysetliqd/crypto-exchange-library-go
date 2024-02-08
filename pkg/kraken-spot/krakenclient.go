@@ -65,6 +65,7 @@ type WebSocketManager struct {
 	LimitChaseMgr        *LimitChaseManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
+	ConnectWaitGroup     sync.WaitGroup
 	ErrorLogger          *log.Logger
 	Mutex                sync.RWMutex
 }
@@ -100,6 +101,7 @@ type OrderBookManager struct {
 type SubscriptionManager struct {
 	PublicSubscriptions  map[string]map[string]*Subscription
 	PrivateSubscriptions map[string]*Subscription
+	SubscribeWaitGroup   sync.WaitGroup
 	Mutex                sync.RWMutex
 }
 

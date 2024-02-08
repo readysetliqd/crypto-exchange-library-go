@@ -22,11 +22,8 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO add some wait group or something to check all subscriptions done
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO add trading rate limit to REST API calls
-// TODO avoid panic when GetBookState and List Bids are called without StartOrderBookManager probably just put a check in there and return error
-// TODO add some wait group or some blocking mechanism for all subscription methods
 
 // #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
 
@@ -38,6 +35,12 @@ import (
 // Note: Creates authenticated token with AuthenticateWebSockets() method which
 // expires within 15 minutes. Strongly recommended to subscribe to at least one
 // private WebSocket channel and leave it open.
+//
+// Note: systemStatusCallback will be triggered twice when Connect() is used as
+// it connects to both an authenticated and a public server. Methods called here
+// intended for initial startup may be triggered twice, recommended to include
+// logic to prevent this or put subscription and startup methods in main after
+// a call to WaitForConnect() instead.
 //
 // CAUTION: Passing nil to arg 'systemStatusCallback' without handling system
 // status changes elsewhere in your program may result in program crashes or
@@ -106,11 +109,16 @@ import (
 //	// create a context with cancel
 //	ctx, cancel := context.WithCancel(context.Background())
 //	// handle system status changes
+//	online := make(chan struct{})
 //	systemStatusCallback := func(status string) {
 //		if status == "online" {
-//			// if system status is online, start the goroutine and subscribe to the book
-//			go placeBidAskSpread(ctx)
-//			err = kc.SubscribeBook(pair, depth, nil)
+//			// starts the goroutine and subscribe to the book the first time an online message is received
+//			_, ok := <-online
+//			if ok {
+//				close(online)
+//				err = kc.SubscribeBook(pair, depth, nil)
+//				go placeBidAskSpread(ctx)
+//			}
 //		} else {
 //			// if system status is not online, cancel the context to stop the goroutine and unsubscribe from the book
 //			cancel()
@@ -171,6 +179,7 @@ func (kc *KrakenClient) connectPublic() error {
 	if err != nil {
 		return fmt.Errorf("error dialing kraken public url | %w", err)
 	}
+	kc.WebSocketManager.ConnectWaitGroup.Add(1)
 	kc.WebSocketManager.WebSocketClient.startMessageReader(wsPublicURL)
 	return nil
 }
@@ -226,8 +235,48 @@ func (kc *KrakenClient) connectPrivate() error {
 	if err != nil {
 		return fmt.Errorf("error dialing kraken private url | %w", err)
 	}
+	kc.WebSocketManager.ConnectWaitGroup.Add(1)
 	kc.WebSocketManager.AuthWebSocketClient.startMessageReader(wsPrivateURL)
 	return nil
+}
+
+// WaitForConnect blocks until the WebSocketManager has established all connections
+// as confirmed by a "systemStatus" "online" message received from Kraken's
+// WebSocket server, or until a timeout of 5 seconds has passed. It returns an
+// error if the timeout is reached before all connections are established.
+// Intended to use to wait until connections are confirmed before subscribing to
+// Kraken's WebSocket channels. Accepts none or one optional arg passed to
+// 'timeoutMilliseconds' which is the number of milliseconds until this method
+// times out and returns an error. Defaults to 5000 (5 seconds) if no args passed.
+//
+// # Example Usage:
+//
+//	kc, err := NewKrakenClient(apiKey, secretKey, 2)
+//	err = kc.Connect(nil)
+//	err = kc.WaitForConnect()
+//	err = kc.SubscribeBook("XBT/USD", 10, nil)
+//	err = kc.SubscribeOwnTrades(nil)
+//	err = kc.WaitForSubscriptions()
+//	//...start your program logic here...//
+func (ws *WebSocketManager) WaitForConnect(timeoutMilliseconds ...uint16) error {
+	timeout := time.Millisecond * 5000
+	if len(timeoutMilliseconds) > 0 {
+		if len(timeoutMilliseconds) > 1 {
+			return fmt.Errorf("too many arguments passed, expected 0 or 1")
+		}
+		timeout = time.Millisecond * time.Duration(timeoutMilliseconds[0])
+	}
+	done := make(chan struct{})
+	go func() {
+		ws.ConnectWaitGroup.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timeout reached; check subscriptions and try again")
+	}
 }
 
 // Iterates through all open public and private subscriptions and sends an
@@ -749,6 +798,7 @@ func (ws *WebSocketManager) SubscribeBook(pair string, depth uint16, callback Ge
 	channelName := fmt.Sprintf("%s-%v", name, depth)
 	payload := fmt.Sprintf(`{"event": "subscribe", "pair": ["%s"], "subscription": {"name": "%s", "depth": %v}%s}`, pair, name, depth, buffer.String())
 	if ws.OrderBookMgr.isTracking.Load() {
+		ws.SubscriptionMgr.SubscribeWaitGroup.Add(1)
 		if callback == nil {
 			callback = ws.bookCallback(channelName, pair, depth, nil)
 			err = ws.subscribePublic(channelName, payload, pair, callback)
@@ -1472,6 +1522,51 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 	return nil
 }
 
+// WaitForSubscriptions blocks until all subscriptions (both private and public)
+// by the WebSocketManager have received a "subscribed" event type message
+// from Kraken WebSocket server or until a timeout of 5 seconds has passed.
+// It returns an error if the timeout is reached before all subscriptions are
+// received. Accepts none or one optional arg passed to 'timeoutMilliseconds'
+// which is the number of milliseconds until this method times out and returns
+// an error. Defaults to 5000 (5 seconds) if no args passed.
+//
+// Note: SubscribeBook() calls perform an additional wait group increment if
+// state of book is being managed internally. The wait group is decremented after
+// initial state of book is built in memory. This prevents race errors if the
+// program following logic requires state of book.
+//
+// # Example Usage:
+//
+//	kc, err := NewKrakenClient(apiKey, secretKey, 2)
+//	err = kc.StartOrderBookManager()
+//	err = kc.Connect(nil)
+//	err = kc.WaitForConnect()
+//	err = kc.SubscribeBook("XBT/USD", 10, nil)
+//	err = kc.SubscribeOwnTrades(nil)
+//	err = kc.WaitForSubscriptions()
+//	//...start your program logic here...//
+//	bookState, err = GetBookState("XBT/USD", 10) // safe to call "immediately"
+func (ws *WebSocketManager) WaitForSubscriptions(timeoutMilliseconds ...uint16) error {
+	timeout := time.Millisecond * 5000
+	if len(timeoutMilliseconds) > 0 {
+		if len(timeoutMilliseconds) > 1 {
+			return fmt.Errorf("too many arguments passed, expected 0 or 1")
+		}
+		timeout = time.Millisecond * time.Duration(timeoutMilliseconds[0])
+	}
+	done := make(chan struct{})
+	go func() {
+		ws.SubscriptionMgr.SubscribeWaitGroup.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timeout reached; check subscriptions and try again")
+	}
+}
+
 // #endregion
 
 // #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s), Start/StopTradingRateLimiter)
@@ -2096,7 +2191,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 	ws.LimitChaseMgr.Mutex.Unlock()
 
 	// start workers to process messages and update orders
-	workerCount := 3
+	workerCount := 5
 	for i := 0; i < workerCount; i++ {
 		go ws.processLimitChaseWorker(ctx, newLC, direction, depth)
 	}
@@ -2252,6 +2347,7 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 			err = fmt.Errorf("error writing subscription message | %w", err)
 			return err
 		}
+		ws.SubscriptionMgr.SubscribeWaitGroup.Add(1)
 	}
 	ws.WebSocketClient.Mutex.Unlock()
 
@@ -2317,6 +2413,7 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 			err = fmt.Errorf("error writing subscription message | %w", err)
 			return err
 		}
+		ws.SubscriptionMgr.SubscribeWaitGroup.Add(1)
 	}
 	ws.AuthWebSocketClient.Mutex.Unlock()
 
@@ -2715,6 +2812,7 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	case WSSubscriptionStatus:
 		switch v.Status {
 		case "subscribed":
+			ws.SubscriptionMgr.SubscribeWaitGroup.Done()
 			if publicChannelNames[v.ChannelName] {
 				if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].ConfirmedChanClosed == 0 {
 					ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].confirmSubscription()
@@ -2739,6 +2837,7 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			return fmt.Errorf("cannot route unknown subscriptionStatus status | %s", v.Status)
 		}
 	case WSSystemStatus:
+		ws.ConnectWaitGroup.Done()
 		if ws.SystemStatusCallback != nil {
 			ws.SystemStatusCallback(v.Status)
 		}
@@ -3161,6 +3260,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 				}
 				ws.OrderBookMgr.Mutex.Unlock()
 				if err := ws.OrderBookMgr.OrderBooks[channelName][pair].buildInitialBook(&msg.OrderBook); err != nil {
+					ws.SubscriptionMgr.SubscribeWaitGroup.Done()
 					ws.ErrorLogger.Printf("error building initial state of book; sending unsubscribe msg; try subscribing again | %s\n", err)
 					err := ws.UnsubscribeBook(pair, depth)
 					if err != nil {
@@ -3168,6 +3268,7 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 					}
 					return
 				}
+				ws.SubscriptionMgr.SubscribeWaitGroup.Done()
 				go func() {
 					ob := ws.OrderBookMgr.OrderBooks[channelName][pair]
 					for {
