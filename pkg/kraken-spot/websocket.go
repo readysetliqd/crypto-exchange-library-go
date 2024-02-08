@@ -2084,7 +2084,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 		pending:         true,
 		partiallyFilled: false,
 		fullyFilled:     false,
-		dataChan:        make(chan interface{}, 5),
+		dataChan:        make(chan interface{}, 10),
 		dataChanOpen:    true,
 		fillCallback:    fillCallback,
 		closeCallback:   closeCallback,
@@ -2095,174 +2095,26 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 	ws.LimitChaseMgr.LimitChaseOrders[userRef] = newLC
 	ws.LimitChaseMgr.Mutex.Unlock()
 
-	// start go routine to listen for fills and book updates
+	// start workers to process messages and update orders
+	workerCount := 3
+	for i := 0; i < workerCount; i++ {
+		go ws.processLimitChaseWorker(ctx, newLC, direction, depth)
+	}
+
+	// handle cancellation
 	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				err = ws.WSCancelOrder(newLC.userRefStr)
-				if err != nil {
-					ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
-				}
-				ws.closeAndDeleteLimitChase(newLC, userRef)
-				return
-			case data := <-newLC.dataChan:
-				switch msg := data.(type) {
-				case WSOpenOrdersResp:
-					for _, openOrder := range msg.OpenOrders {
-						for _, order := range openOrder {
-							switch {
-							case order.Status == "pending":
-								newLC.mutex.Lock()
-								newLC.pending = false
-								orderPrice, err := decimal.NewFromString(order.Description.Price)
-								if err != nil { // not sure we need to cancel&quit here, what situations does kraken send invalid price on a pending order?
-									ws.ErrorLogger.Println("error encountered during limit chase | error converting string to decimal; cancelling and closing |", err)
-								}
-								newLC.partiallyFilled = false
-								newLC.orderPrice = orderPrice
-								newLC.mutex.Unlock()
-							case order.Status == "canceled" && order.CancelReason != "Order replaced":
-								// This case should also be true when closeAndDeleteLimitChase cancels a partially filled order
-								bookState, err := ws.GetBookState(pair, depth)
-								if err != nil {
-									ws.ErrorLogger.Println("error encountered during limit chase | error getting book state on order cancelled; shutting down, restart limit chase if desired")
-									ws.closeAndDeleteLimitChase(newLC, userRef)
-									return
-								}
-								newLC.mutex.Lock()
-								newLC.pending = true
-								var newPrice decimal.Decimal
-								switch dir {
-								case 1: // "buy"
-									newPrice = (*bookState.Bids)[0].Price
-								case -1: // "sell"
-									newPrice = (*bookState.Asks)[0].Price
-								}
-								ws.WSAddOrder(WSLimit(newPrice.String()), direction, newLC.remainingVol.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
-								newLC.mutex.Unlock()
-							case order.Status == "closed":
-								newLC.mutex.Lock()
-								newLC.fullyFilled = true
-								newLC.mutex.Unlock()
-								ws.closeAndDeleteLimitChase(newLC, userRef)
-								return
-							case order.VolumeExecuted != "":
-								volExec, err := decimal.NewFromString(order.VolumeExecuted)
-								if err != nil { // not sure we need to cancel&quit here, what situations does kraken send VolumeExecuted on an order?
-									ws.ErrorLogger.Println("error converting volume executed to decimal | ", order.VolumeExecuted)
-								}
-								if volExec.Cmp(decimal.Zero) != 0 {
-									newLC.mutex.Lock()
-									filledVol := volExec.Sub(newLC.filledVol)
-									newLC.filledVol = volExec
-									newLC.remainingVol = newLC.startingVolume.Sub(newLC.filledVol)
-									fill := &LimitChaseFill{
-										FilledVol:    filledVol,
-										RemainingVol: newLC.remainingVol,
-									}
-									if newLC.fillCallback != nil {
-										newLC.fillCallback(fill)
-									}
-									if newLC.remainingVol.Cmp(decimal.Zero) == 0 {
-										newLC.fullyFilled = true
-										// order fully filled; call fillCallback and close limit-chase
-										newLC.mutex.Unlock()
-										ws.closeAndDeleteLimitChase(newLC, userRef)
-										return
-									} else { // order partially filled, call fillCallback
-										newLC.partiallyFilled = true
-										newLC.mutex.Unlock()
-									}
-								}
-							}
-						}
-					}
-				case WSBookUpdateResp:
-					bookState, err := ws.GetBookState(pair, depth)
-					if err != nil {
-						ws.ErrorLogger.Println("error encountered during limit chase | error getting book state; cancelling order and closing")
-						err = ws.WSCancelOrder(newLC.userRefStr)
-						if err != nil {
-							ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
-						}
-						ws.closeAndDeleteLimitChase(newLC, userRef)
-						return
-					}
-					var newPrice decimal.Decimal
-					switch dir {
-					case 1: // "buy"
-						newPrice = (*bookState.Bids)[0].Price
-					case -1: // "sell"
-						newPrice = (*bookState.Asks)[0].Price
-					}
-					newLC.mutex.Lock()
-					if newLC.orderPrice.Cmp(newPrice) != 0 && !newLC.fullyFilled {
-						err = ws.updateLimitChase(newLC, newPrice, pair)
-						if err != nil {
-							ws.ErrorLogger.Println("error encountered during limit chase | error updating price; cancelling order and closing")
-							err = ws.WSCancelOrder(newLC.userRefStr)
-							if err != nil {
-								ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
-							}
-							newLC.mutex.Unlock()
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						}
-					}
-					newLC.mutex.Unlock()
-				case WSAddOrderResp:
-					if msg.Status != "ok" {
-						if strings.Contains(msg.ErrorMessage, "Invalid arguments:volume") {
-							// remaining volume less than min order size; or invalid volume closing
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						} else if strings.Contains(msg.ErrorMessage, "Currency pair not supported") {
-							// invalid tradeable pair passed to 'pair'; closing
-							ws.ErrorLogger.Println("error encountered during limit chase | invalid arg passed to 'pair':", pair)
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						} else if strings.Contains(msg.ErrorMessage, "Invalid price") {
-							// invalid price passed, this should never happen; closing
-							ws.ErrorLogger.Println("error encountered during limit chase | unexpected invalid price passed in limit chase", msg)
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						}
-					}
-				case WSEditOrderResp:
-					if msg.Status != "ok" {
-						if strings.Contains(msg.ErrorMessage, "Userref linked with multiple orders") {
-							// non-unique userref, cancels all orders with userref including the limit-chase; close
-							ws.ErrorLogger.Println("error encountered during limit chase | non-unique id passed to 'userRef'; cancelling all orders with userRef", newLC.userRefStr)
-							err := ws.WSCancelOrder(newLC.userRefStr)
-							if err != nil {
-								ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
-							}
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						} else if strings.Contains(msg.ErrorMessage, "Unknown order") {
-							// Order no longer exists OR pending flag checks are not working correctly
-							ws.ErrorLogger.Println("error encountered during limit chase | order was not found for editing, order may have been cancelled by another process; closing limit-chase")
-							ws.closeAndDeleteLimitChase(newLC, userRef)
-							return
-						}
-					}
-				case WSCancelOrderResp:
-					if strings.Contains(msg.ErrorMessage, "Unknown order") {
-						// Order no longer exists OR pending flag checks are not working correctly
-						ws.ErrorLogger.Println("error encountered during limit chase | order was not found for cancelling, order may have been cancelled by another process; closing limit-chase")
-						ws.closeAndDeleteLimitChase(newLC, userRef)
-						return
-					}
-				}
-			}
+		<-ctx.Done()
+		err = ws.WSCancelOrder(newLC.userRefStr)
+		if err != nil {
+			ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
 		}
+		ws.closeAndDeleteLimitChase(userRef)
 	}()
 
 	// get top of book price and send initial order
 	bookState, err := ws.GetBookState(pair, depth)
 	if err != nil {
-		ws.closeAndDeleteLimitChase(newLC, userRef)
+		ws.closeAndDeleteLimitChase(newLC.userRef)
 		return fmt.Errorf("error encountered during limit chase | error getting book state; closing | %w", err)
 	}
 	var topOfBook decimal.Decimal
@@ -2274,57 +2126,8 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 	}
 	err = ws.WSAddOrder(WSLimit(topOfBook.String()), direction, newLC.startingVolume.String(), pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
 	if err != nil {
-		ws.closeAndDeleteLimitChase(newLC, userRef)
+		ws.closeAndDeleteLimitChase(newLC.userRef)
 		return fmt.Errorf("error encountered during limit chase | error sending first order | %w", err)
-	}
-	return nil
-}
-
-// closeAndDeleteLimitChase is a helper method to safely close the data channel
-// of a LimitChase order, remove it from the LimitChaseOrders map, and call the
-// closeCallback if one was provided on LimitChase creation. It takes a pointer
-// to a LimitChase struct and a userRef as arguments. The method ensures thread
-// safety by using a mutex lock when deleting the LimitChase order from the map.
-func (ws *WebSocketManager) closeAndDeleteLimitChase(lc *LimitChase, userRef int32) {
-	ws.LimitChaseMgr.Mutex.Lock()
-	lc.mutex.Lock()
-	lc.dataChanOpen = false
-	close(lc.dataChan)
-	lc.mutex.Unlock()
-	delete(ws.LimitChaseMgr.LimitChaseOrders, userRef)
-	ws.LimitChaseMgr.Mutex.Unlock()
-	if lc.closeCallback != nil {
-		lc.closeCallback()
-	}
-}
-
-// updateLimitChase updates the state of a LimitChase order based on the new top
-// of book price and sends either an WSEditOrder with the newPrice or a
-// WSCancelOrder if the LimitChase has been partially filled. It takes a pointer
-// to a LimitChase struct, a new price, and a pair as arguments. If the
-// LimitChase order is not pending and not partially filled, it sends an edit
-// order request to the server. If the LimitChase order is partially filled,
-// it cancels the existing order and updates the starting volume. The method
-// returns an error if there's an issue with sending the edit or cancel order
-// request to the server.
-func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.Decimal, pair string) error {
-	if !lc.pending {
-		if !lc.partiallyFilled {
-			lc.pending = true
-			err := ws.WSEditOrder(lc.userRefStr, pair, WSNewPostOnly(), WSNewPrice(newPrice.String()), WSEditOrderReqID(lc.userRefStr), WSNewUserRef(lc.userRefStr))
-			if err != nil {
-				return fmt.Errorf("error calling WSEditOrder | %w", err)
-			}
-		} else {
-			lc.pending = true
-			lc.partiallyFilled = false
-			lc.startingVolume = lc.remainingVol
-			lc.filledVol = decimal.Zero
-			err := ws.WSCancelOrder(lc.userRefStr)
-			if err != nil {
-				return fmt.Errorf("error calling WSCancelOrder | %w", err)
-			}
-		}
 	}
 	return nil
 }
@@ -2334,12 +2137,9 @@ func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.De
 // ensures thread safety by using a mutex lock when accessing the map. It returns
 // an error if a LimitChase order with the given 'userRef' doesn't exist.
 func (ws *WebSocketManager) CancelLimitChase(userRef int32) error {
-	ws.LimitChaseMgr.Mutex.RLock()
 	if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[userRef]; !ok {
-		ws.LimitChaseMgr.Mutex.RUnlock()
 		return fmt.Errorf("limit chase order with userRef %v doesn't exist", userRef)
 	} else {
-		ws.LimitChaseMgr.Mutex.RUnlock()
 		lc.cancel()
 	}
 	return nil
@@ -2412,7 +2212,7 @@ func (ws *WebSocketManager) StopTradingRateLimiter() error {
 
 // #endregion
 
-// #region *WebSocketManager helper methods (subscribe, readers, routers, trading rate-limiter)
+// #region *WebSocketManager helper methods (subscribe, readers, routers, trading rate-limiter, limit-chase)
 
 // Helper method for public data subscribe methods to handle initializing
 // Subscription, sending payload to server, and starting go routine with
@@ -2765,13 +2565,18 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 		// limit chase orders, send to appropriate channels if limit chase exists
 		ws.LimitChaseMgr.Mutex.RLock()
 		if len(ws.LimitChaseMgr.LimitChaseOrders) > 0 {
-			for _, order := range ws.LimitChaseMgr.LimitChaseOrders {
-				if order.pair == v.Pair {
-					order.mutex.RLock()
-					if order.dataChanOpen {
-						order.dataChan <- v
+			for _, lc := range ws.LimitChaseMgr.LimitChaseOrders {
+				if lc.pair == v.Pair {
+					lc.mutex.RLock()
+					if lc.dataChanOpen {
+						select {
+						case lc.dataChan <- v:
+						default: // cancel limit chase if dataChan not able to receive
+							ws.ErrorLogger.Println("*LimitChase.dataChan not able to receive message; cancelling limit-chase")
+							ws.CancelLimitChase(lc.userRef)
+						}
 					}
-					order.mutex.RUnlock()
+					lc.mutex.RUnlock()
 				}
 			}
 		}
@@ -2807,7 +2612,12 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 					if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(order.UserRef)]; ok {
 						lc.mutex.RLock()
 						if lc.dataChanOpen {
-							lc.dataChan <- v
+							select {
+							case lc.dataChan <- v:
+							default: // cancel limit chase if dataChan not able to receive
+								ws.ErrorLogger.Println("*LimitChase.dataChan not able to receive message; cancelling limit-chase")
+								ws.CancelLimitChase(lc.userRef)
+							}
 						}
 						lc.mutex.RUnlock()
 					}
@@ -2833,7 +2643,12 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
 				lc.mutex.RLock()
 				if lc.dataChanOpen {
-					lc.dataChan <- v
+					select {
+					case lc.dataChan <- v:
+					default: // cancel limit chase if dataChan not able to receive
+						ws.ErrorLogger.Println("*LimitChase.dataChan not able to receive message; cancelling limit-chase")
+						ws.CancelLimitChase(lc.userRef)
+					}
 				}
 				lc.mutex.RUnlock()
 			}
@@ -2849,7 +2664,12 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
 				lc.mutex.RLock()
 				if lc.dataChanOpen {
-					lc.dataChan <- v
+					select {
+					case lc.dataChan <- v:
+					default: // cancel limit chase if dataChan not able to receive
+						ws.ErrorLogger.Println("*LimitChase.dataChan not able to receive message; cancelling limit-chase")
+						ws.CancelLimitChase(lc.userRef)
+					}
 				}
 				lc.mutex.RUnlock()
 			}
@@ -2865,7 +2685,12 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 			if lc, ok := ws.LimitChaseMgr.LimitChaseOrders[int32(v.RequestID)]; ok {
 				lc.mutex.RLock()
 				if lc.dataChanOpen {
-					lc.dataChan <- v
+					select {
+					case lc.dataChan <- v:
+					default: // cancel limit chase if dataChan not able to receive
+						ws.ErrorLogger.Println("*LimitChase.dataChan not able to receive message; cancelling limit-chase")
+						ws.CancelLimitChase(lc.userRef)
+					}
 				}
 				lc.mutex.RUnlock()
 			}
@@ -2959,6 +2784,228 @@ func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
 		ws.TradingRateLimiter.Mutex.Unlock()
 		ws.TradingRateLimiter.CounterDecayConds[pair].Broadcast()
 	}
+}
+
+// closeAndDeleteLimitChase is a helper method to safely close the data channel
+// of a LimitChase order, remove it from the LimitChaseOrders map, and call the
+// closeCallback if one was provided on LimitChase creation. It takes a pointer
+// to a LimitChase struct and a userRef as arguments. The method ensures thread
+// safety by using a mutex lock when deleting the LimitChase order from the map.
+func (ws *WebSocketManager) closeAndDeleteLimitChase(userRef int32) {
+	ws.LimitChaseMgr.Mutex.Lock()
+	lc, ok := ws.LimitChaseMgr.LimitChaseOrders[userRef]
+	if !ok {
+		return
+	}
+	lc.mutex.Lock()
+	lc.dataChanOpen = false
+	close(lc.dataChan)
+	lc.mutex.Unlock()
+	delete(ws.LimitChaseMgr.LimitChaseOrders, userRef)
+	ws.LimitChaseMgr.Mutex.Unlock()
+	if lc.closeCallback != nil {
+		lc.closeCallback()
+	}
+}
+
+// processLimitChaseWorker is a helper method that processes incoming messages
+// on a *LimitChase's dataChan and depending on the message type and content,
+// either sends an update (edit or cancel&replace) order, closes the LimitChase,
+// or calls LimitChase callbacks. The dataChan gets incoming messages from two
+// startMessageReader() go routines (one each of authenticated and public
+// WebSocketClient) and may cause limit-chase to eject in routeOrderMessage(),
+// routePublicMessage(), or routePrivateMessage() if dataChan is not able to
+// receive messages, so a sufficient number workers and dataChan buffer is required.
+func (ws *WebSocketManager) processLimitChaseWorker(ctx context.Context, newLC *LimitChase, direction string, depth uint16) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case data, ok := <-newLC.dataChan:
+			if !ok {
+				return
+			}
+			switch msg := data.(type) {
+			case WSOpenOrdersResp:
+				for _, openOrder := range msg.OpenOrders {
+					for _, order := range openOrder {
+						switch {
+						case order.Status == "pending":
+							newLC.mutex.Lock()
+							newLC.pending = false
+							orderPrice, err := decimal.NewFromString(order.Description.Price)
+							if err != nil { // not sure we need to cancel&quit here, what situations does kraken send invalid price on a pending order?
+								ws.ErrorLogger.Println("error encountered during limit chase | error converting string to decimal; cancelling and closing |", err)
+							}
+							newLC.partiallyFilled = false
+							newLC.orderPrice = orderPrice
+							newLC.mutex.Unlock()
+						case order.Status == "canceled" && order.CancelReason != "Order replaced":
+							// This case should also be true when closeAndDeleteLimitChase cancels a partially filled order
+							bookState, err := ws.GetBookState(newLC.pair, depth)
+							if err != nil {
+								ws.ErrorLogger.Println("error encountered during limit chase | error getting book state on order cancelled; shutting down, restart limit chase if desired")
+								ws.closeAndDeleteLimitChase(newLC.userRef)
+								return
+							}
+							newLC.mutex.Lock()
+							newLC.pending = true
+							var newPrice decimal.Decimal
+							switch newLC.direction {
+							case 1: // "buy"
+								newPrice = (*bookState.Bids)[0].Price
+							case -1: // "sell"
+								newPrice = (*bookState.Asks)[0].Price
+							}
+							ws.WSAddOrder(WSLimit(newPrice.String()), direction, newLC.remainingVol.String(), newLC.pair, WSPostOnly(), WSAddOrderReqID(newLC.userRefStr), WSUserRef(newLC.userRefStr))
+							newLC.mutex.Unlock()
+						case order.Status == "closed":
+							newLC.mutex.Lock()
+							newLC.fullyFilled = true
+							newLC.mutex.Unlock()
+							ws.closeAndDeleteLimitChase(newLC.userRef)
+							return
+						case order.VolumeExecuted != "":
+							volExec, err := decimal.NewFromString(order.VolumeExecuted)
+							if err != nil { // not sure we need to cancel&quit here, what situations does kraken send VolumeExecuted on an order?
+								ws.ErrorLogger.Println("error converting volume executed to decimal | ", order.VolumeExecuted)
+							}
+							if volExec.Cmp(decimal.Zero) != 0 {
+								newLC.mutex.Lock()
+								filledVol := volExec.Sub(newLC.filledVol)
+								newLC.filledVol = volExec
+								newLC.remainingVol = newLC.startingVolume.Sub(newLC.filledVol)
+								fill := &LimitChaseFill{
+									FilledVol:    filledVol,
+									RemainingVol: newLC.remainingVol,
+								}
+								if newLC.fillCallback != nil {
+									newLC.fillCallback(fill)
+								}
+								if newLC.remainingVol.Cmp(decimal.Zero) == 0 {
+									newLC.fullyFilled = true
+									// order fully filled; call fillCallback and close limit-chase
+									newLC.mutex.Unlock()
+									ws.closeAndDeleteLimitChase(newLC.userRef)
+									return
+								} else { // order partially filled, call fillCallback
+									newLC.partiallyFilled = true
+									newLC.mutex.Unlock()
+								}
+							}
+						}
+					}
+				}
+			case WSBookUpdateResp:
+				bookState, err := ws.GetBookState(newLC.pair, depth)
+				if err != nil {
+					ws.ErrorLogger.Println("error encountered during limit chase | error getting book state; cancelling order and closing")
+					err = ws.WSCancelOrder(newLC.userRefStr)
+					if err != nil {
+						ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+					}
+					ws.closeAndDeleteLimitChase(newLC.userRef)
+					return
+				}
+				var newPrice decimal.Decimal
+				switch newLC.direction {
+				case 1: // "buy"
+					newPrice = (*bookState.Bids)[0].Price
+				case -1: // "sell"
+					newPrice = (*bookState.Asks)[0].Price
+				}
+				newLC.mutex.Lock()
+				if newLC.orderPrice.Cmp(newPrice) != 0 && !newLC.fullyFilled {
+					err = ws.updateLimitChase(newLC, newPrice, newLC.pair)
+					if err != nil {
+						ws.ErrorLogger.Println("error encountered during limit chase | error updating price; cancelling order and closing")
+						err = ws.WSCancelOrder(newLC.userRefStr)
+						if err != nil {
+							ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+						}
+						newLC.mutex.Unlock()
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					}
+				}
+				newLC.mutex.Unlock()
+			case WSAddOrderResp:
+				if msg.Status != "ok" {
+					if strings.Contains(msg.ErrorMessage, "Invalid arguments:volume") {
+						// remaining volume less than min order size; or invalid volume closing
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					} else if strings.Contains(msg.ErrorMessage, "Currency pair not supported") {
+						// invalid tradeable pair passed to 'pair'; closing
+						ws.ErrorLogger.Println("error encountered during limit chase | invalid arg passed to 'pair':", newLC.pair)
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					} else if strings.Contains(msg.ErrorMessage, "Invalid price") {
+						// invalid price passed, this should never happen; closing
+						ws.ErrorLogger.Println("error encountered during limit chase | unexpected invalid price passed in limit chase", msg)
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					}
+				}
+			case WSEditOrderResp:
+				if msg.Status != "ok" {
+					if strings.Contains(msg.ErrorMessage, "Userref linked with multiple orders") {
+						// non-unique userref, cancels all orders with userref including the limit-chase; close
+						ws.ErrorLogger.Println("error encountered during limit chase | non-unique id passed to 'userRef'; cancelling all orders with userRef", newLC.userRefStr)
+						err := ws.WSCancelOrder(newLC.userRefStr)
+						if err != nil {
+							ws.ErrorLogger.Printf("error encountered closing limit chase | error cancelling order with userref %s; must cancel manually\n", newLC.userRefStr)
+						}
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					} else if strings.Contains(msg.ErrorMessage, "Unknown order") {
+						// Order no longer exists OR pending flag checks are not working correctly
+						ws.ErrorLogger.Println("error encountered during limit chase | order was not found for editing, order may have been cancelled by another process; closing limit-chase")
+						ws.closeAndDeleteLimitChase(newLC.userRef)
+						return
+					}
+				}
+			case WSCancelOrderResp:
+				if strings.Contains(msg.ErrorMessage, "Unknown order") {
+					// Order no longer exists OR pending flag checks are not working correctly
+					ws.ErrorLogger.Println("error encountered during limit chase | order was not found for cancelling, order may have been cancelled by another process; closing limit-chase")
+					ws.closeAndDeleteLimitChase(newLC.userRef)
+					return
+				}
+			}
+		}
+	}
+}
+
+// updateLimitChase updates the state of a LimitChase order based on the new top
+// of book price and sends either an WSEditOrder with the newPrice or a
+// WSCancelOrder if the LimitChase has been partially filled. It takes a pointer
+// to a LimitChase struct, a new price, and a pair as arguments. If the
+// LimitChase order is not pending and not partially filled, it sends an edit
+// order request to the server. If the LimitChase order is partially filled,
+// it cancels the existing order and updates the starting volume. The method
+// returns an error if there's an issue with sending the edit or cancel order
+// request to the server.
+func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.Decimal, pair string) error {
+	if !lc.pending {
+		if !lc.partiallyFilled {
+			lc.pending = true
+			err := ws.WSEditOrder(lc.userRefStr, pair, WSNewPostOnly(), WSNewPrice(newPrice.String()), WSEditOrderReqID(lc.userRefStr), WSNewUserRef(lc.userRefStr))
+			if err != nil {
+				return fmt.Errorf("error calling WSEditOrder | %w", err)
+			}
+		} else {
+			lc.pending = true
+			lc.partiallyFilled = false
+			lc.startingVolume = lc.remainingVol
+			lc.filledVol = decimal.Zero
+			err := ws.WSCancelOrder(lc.userRefStr)
+			if err != nil {
+				return fmt.Errorf("error calling WSCancelOrder | %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // #endregion
