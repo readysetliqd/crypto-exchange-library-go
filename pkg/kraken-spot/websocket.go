@@ -1756,7 +1756,7 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	return nil
 }
 
-// Sends an edit order request for the order with same arg 'orderID' and 'pair'.
+// WSEditOrder Sends an edit order request for the order with 'orderID' and 'pair'.
 // Must have at least one of WSNewVolume() WSNewPrice() WSNewPrice2() functional
 // options args passed to 'options', but may also have many.
 //
@@ -1803,8 +1803,21 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 		var incrementAmount int32
 		if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
 			order, ok := ws.OpenOrdersMgr.OpenOrders[orderID]
-			if !ok { // TODO check if its a userref, make sure theres only one
-				return fmt.Errorf("open order with id %s not found", orderID)
+			if !ok {
+				ordersWithUserRef := []WSOpenOrder{}
+				for _, o := range ws.OpenOrdersMgr.OpenOrders {
+					if fmt.Sprintf("%v", o.UserRef) == orderID {
+						ordersWithUserRef = append(ordersWithUserRef, o)
+					}
+				}
+				switch len(ordersWithUserRef) {
+				case 0:
+					return fmt.Errorf("open order with id/userRef %s not found", orderID)
+				case 1:
+					order = ordersWithUserRef[0]
+				default:
+					return fmt.Errorf("userref passed to 'orderID' linked with multiple orders, try calling WSEditOrder again with unique orderID instead")
+				}
 			}
 			openTime, err := strconv.ParseInt(order.OpenTime, 10, 64)
 			if err != nil {
