@@ -1,3 +1,14 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The private-api.go file contains functions that interact with both public
+// and private endpoints of the Kraken API. These functions require the
+// creation of a KrakenClient and include methods for querying system status,
+// account information, and asset information, trading, etc. This file plays a
+// crucial role in facilitating authenticated interactions with the Kraken API.
 package krakenspot
 
 import (
@@ -3052,7 +3063,6 @@ func (kc *KrakenClient) GetWithdrawalInfo(asset string, key string, amount strin
 	return &withdrawalInfo, nil
 }
 
-// TODO test if this works
 // Calls Kraken API private Funding "Withdraw" endpoint. Makes a withdrawal
 // request for specified args 'asset', withdrawal key name 'key', and 'amount'.
 // If successful, returns resulting reference ID as a string.

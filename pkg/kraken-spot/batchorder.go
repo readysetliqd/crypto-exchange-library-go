@@ -1,3 +1,13 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The batchorder.go file provides the BatchOrder struct and associated methods
+// for handling batch orders in the Kraken Spot Trading API. This file is
+// specifically used for the authenticated AddOrderBatch method from the
+// private-api.go file.
 package krakenspot
 
 type BatchOrder struct {

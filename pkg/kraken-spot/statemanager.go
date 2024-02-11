@@ -1,3 +1,15 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The statemanager.go file specifically contains the implementation of the
+// state manager, which is used to manage the state of the KrakenClient. It
+// includes the declaration of the State and Event interfaces, their default
+// implementations, and the methods for adding, setting, and getting states.
+// This file plays a crucial role in managing the state of interactions with
+// the Kraken Spot Exchange API.
 package krakenspot
 
 import (
@@ -46,6 +58,7 @@ func (e *DefaultEvent) Process() error {
 	return nil
 }
 
+// TODO write docstrings
 func (kc *KrakenClient) StartStateManager(currentState ...State) error {
 	var state State = nil
 	if len(currentState) > 0 {
@@ -61,12 +74,14 @@ func (kc *KrakenClient) StartStateManager(currentState ...State) error {
 	return nil
 }
 
+// TODO write docstrings
 func (sm *StateManager) AddState(stateName string, state State) {
 	sm.Mutex.Lock()
 	sm.states[stateName] = state
 	sm.Mutex.Unlock()
 }
 
+// TODO write docstrings
 func (sm *StateManager) SetState(state State) {
 	sm.Mutex.Lock()
 	if sm.currentState != nil {
@@ -77,6 +92,7 @@ func (sm *StateManager) SetState(state State) {
 	sm.currentState.Enter()
 }
 
+// TODO write docstrings
 func (sm *StateManager) GetState(stateName string) (State, error) {
 	sm.Mutex.RLock()
 	defer sm.Mutex.RUnlock()

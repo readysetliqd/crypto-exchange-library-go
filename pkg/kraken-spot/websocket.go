@@ -1,3 +1,14 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The websocket.go file specifically handles all interactions with Kraken's
+// WebSocket server. This includes connecting, subscribing to public and
+// private channels and sending orders among other operations. The code in
+// this file is organized in sections, reflecting the order in which they would
+// typically be called by an end user importing this package.
 package krakenspot
 
 import (
@@ -22,10 +33,290 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// TODO package level comment and file specific comments
+// TODO reorganize code in order of calling. Start<Features>; Connect; Subscribe; SendOrders
+// TODO reorganize helper methods to their own regions
+// TODO add balance manager
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO add trading rate limit to REST API calls
 
-// #region Exported WebSocket connection methods (Connect, Subscribe<>, and Unsubscribe<>)
+// #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
+
+// StartOrderBookManager changes the flag for ws.OrderBookMgr to signal new
+// SubscribeBook() subscription calls to track the current state of book in memory.
+// Does not apply to already existing subscriptions, unsubscribe and resubscribe
+// as necessary.
+func (ws *WebSocketManager) StartOrderBookManager() error {
+	if !ws.OrderBookMgr.isTracking.CompareAndSwap(false, true) {
+		return fmt.Errorf("OrderBookManager already running")
+	}
+	return nil
+}
+
+// StopOrderBookManager changes the flag for ws.OrderBookMgr to signal new
+// SubscribeBook() subscription calls not to track the current state of book
+// in memory. Does not apply to already existing subscriptions, unsubscribe
+// and resubscribe as necessary.
+func (ws *WebSocketManager) StopOrderBookManager() error {
+	if !ws.OrderBookMgr.isTracking.CompareAndSwap(true, false) {
+		return fmt.Errorf("OrderBookManager already stopped")
+	}
+	return nil
+}
+
+// StartTradeLogger() starts a trade logger which opens, or creates if not exists,
+// a file with 'filename' and writes all incoming trades from an "ownTrades"
+// WebSocket channel subscription in json lines format. Suggested to call this
+// method before SubscribeOwnTrades(). If errors occur, will log the errors
+// to ErrorLogger (defaults to stdout if none is set) also structures the error
+// message and logs it to the TradeLogger file.
+//
+// Note: Ignores "snapshot" trades
+//
+// # Example Usage:
+//
+//	err := kc.StartTradeLogger("todays_trades.jsonl")
+//	ownTradesCallback := func(ownTradesData interface{}) {
+//		// Don't need to do anything extra here for trades to be logged
+//		log.Println("an executed trade was logged by the logger!")
+//	}
+//	kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
+//	// deferred function to close "todays_trades.log" in event of panic or shutdown
+//	defer func() {
+//		if r := recover(); r != nil {
+//			fmt.Println("Recovered from panic:", r)
+//		}
+//		err := kc.StopTradeLogger()
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//	}()
+func (ws *WebSocketManager) StartTradeLogger(filename string) error {
+	if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
+		return errors.New("tradeLogger is already running")
+	}
+
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		return fmt.Errorf("error opening file %s | %w", filename, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ws.Mutex.Lock()
+	ws.TradeLogger = &TradeLogger{
+		file:       file,
+		writer:     bufio.NewWriter(file),
+		ch:         make(chan map[string]WSOwnTrade, 100),
+		seqErrorCh: make(chan error),
+		seq:        0,
+		startSeq:   1,
+		ctx:        ctx,
+		cancel:     cancel,
+	}
+	ws.TradeLogger.isLogging.Store(true)
+	ws.Mutex.Unlock()
+	ws.TradeLogger.wg.Add(1)
+
+	go func(ctx context.Context) {
+		defer ws.TradeLogger.wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case trade, ok := <-ws.TradeLogger.ch:
+				if !ok {
+					return
+				}
+				tradeJson, err := json.Marshal(trade)
+				if err != nil {
+					ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
+					continue
+				}
+				_, err = ws.TradeLogger.writer.WriteString(string(tradeJson) + "\n")
+				if err != nil {
+					ws.handleTradeLoggerError("error writing trade JSON to string", err, trade)
+					continue
+				}
+				err = ws.TradeLogger.writer.Flush()
+				if err != nil {
+					ws.handleTradeLoggerError("error flushing writer", err, trade)
+				}
+			case err, ok := <-ws.TradeLogger.seqErrorCh:
+				if !ok {
+					return
+				}
+				ws.handleTradeLoggerError("sequence error", err, nil)
+			}
+		}
+	}(ctx)
+
+	return nil
+}
+
+// Waits until go routine finishes writing trades to file then closes TradeLogger
+// channel and Tradelogger file. Recommended to call this method explicitly and/or
+// inside of a defer func to ensure file close is triggered. Logic within this
+// method is behind an atomic.bool check, so calling this method multiple times
+// should not cause any issues in your program.
+//
+// # Example Usage:
+//
+//	// Create the WebSocketManager and start the TradeLogger
+//	err := kc.StartTradeLogger("trades.log")
+//	// Defer a function to recover from a panic and call StopTradeLogger() for "trades.log" file closure
+//	defer func() {
+//		if r := recover(); r != nil {
+//			fmt.Println("Recovered from panic:", r)
+//		}
+//		err := ws.StopTradeLogger()
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//	}()
+//	//...Your program logic here...//
+//	// Listen for shutdown signals
+//	shutdown := make(chan os.Signal, 1)
+//	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+//	// Wait for a shutdown signal
+//	<-shutdown
+func (ws *WebSocketManager) StopTradeLogger() error {
+	if ws.TradeLogger == nil {
+		return fmt.Errorf("trade logger never initialized, call StartTradeLogger() method")
+	}
+	if ws.TradeLogger.isLogging.CompareAndSwap(true, false) {
+		ws.TradeLogger.cancel()
+		close(ws.TradeLogger.ch)
+		close(ws.TradeLogger.seqErrorCh)
+		ws.TradeLogger.wg.Wait()
+		return ws.TradeLogger.file.Close()
+	}
+	return fmt.Errorf("trade logger is already stopped")
+}
+
+// Starts the open orders manager. Call this method before SubscribeOpenOrders().
+// It will build initial state of all currently open orders and maintain it in
+// memory as new open order update messages come in.
+//
+// # Example Usage:
+//
+//	// Print current state of open orders every 15 seconds
+//	err := kc.StartOpenOrderManager()
+//	if err != nil...
+//	err := kc.SubscribeOpenOrders()
+//	if err != nil...
+//	ticker := time.NewTicker(time.Second * 15)
+//	for range ticker.C {
+//		orders := kc.MapOpenOrders()
+//		log.Println(orders)
+//	}
+func (ws *WebSocketManager) StartOpenOrderManager() error {
+	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+		return fmt.Errorf("OpenOrderManager is already running")
+	} else if ws.OpenOrdersMgr == nil {
+		ws.OpenOrdersMgr = &OpenOrderManager{
+			OpenOrders: make(map[string]WSOpenOrder),
+			ch:         make(chan (WSOpenOrdersResp)),
+			seq:        0,
+		}
+		ws.OpenOrdersMgr.isTracking.Store(true)
+		go ws.startOpenOrderManager()
+	} else if ws.OpenOrdersMgr.isTracking.CompareAndSwap(false, true) {
+		ws.OpenOrdersMgr.ch = make(chan WSOpenOrdersResp)
+		ws.OpenOrdersMgr.seq = 0
+		go ws.startOpenOrderManager()
+	} else {
+		return fmt.Errorf("an error occurred starting OpenOrderManager")
+	}
+
+	return nil
+}
+
+// StopOpenOrderManager() stops the internal tracking of current open orders.
+// Closes channel and clears the internal OpenOrders map.
+func (ws *WebSocketManager) StopOpenOrderManager() error {
+	if ws.OpenOrdersMgr == nil {
+		return fmt.Errorf("OpenOrderManager never initialized, call StartOpenOrderManager() method")
+	}
+	if ws.OpenOrdersMgr.isTracking.CompareAndSwap(true, false) {
+		close(ws.OpenOrdersMgr.ch)
+		ws.OpenOrdersMgr.wg.Wait()
+		// clear map
+		ws.OpenOrdersMgr.Mutex.Lock()
+		ws.OpenOrdersMgr.OpenOrders = nil
+		ws.OpenOrdersMgr.Mutex.Unlock()
+		return nil
+	}
+	return fmt.Errorf("OpenOrderManager is already stopped")
+}
+
+// StartTradingRateLimiter starts self rate-limiting for "order" type WebSocket
+// methods. The "order" type methods include WSAddOrder(), WSEditOrder(),
+// WSCancelOrder(), and WSCancelOrders(). Must have an active subscription to
+// "openOrders" channel with SubscribeOpenOrders() before sending any orders
+// for self rate-limiting logic to work correctly.
+//
+// Note: It's recommended to start open orders internal management with
+// StartOpenOrderManager() before subscribing to "openOrders" channel. If open
+// order manager is not started before subscribing, rate-limiter for edit
+// orders will default to assuming a max incremement penalty and cancel orders
+// will simply skip rate-limiting logic. Accepts one or none optional arg
+// passed to 'maxCounterBufferPercent' which is a percent of the total max
+// counter for your verification tier that will act as a buffer to attempt to
+// avoid exceeding max counter rate when multiple order methods for the same
+// pair are called consecutively and race to pass the rate-limit check.
+//
+// Note: Activating self rate-limiting may add significant processing overhead
+// and waits and only attempts to prevent hitting the max. It is likely better to
+// implement rate-limiting yourself and/or design your strategy not to approach
+// rate-limits.
+//
+// # Enum:
+//
+// 'maxCounterBufferPercent' - [0..99]
+//
+// # Example Usage:
+//
+// Note: error assignment and handling omitted throughout
+//
+//	// Creates new client, connects, starts required features for rate-limiting
+//	// with a 20% buffer, subscribes, and sends an order
+//	kc := NewKrakenClient(apikey, apisecret, 2)
+//	kc.ConnectPrivate()
+//	kc.StartOpenOrderManager()
+//	kc.StartTradingRateLimiter(20)
+//	kc.SubscribeOpenOrders(openOrdersCallback)
+//	// send orders as needed
+//	kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
+//	// etc...
+func (ws *WebSocketManager) StartTradingRateLimiter(maxCounterBufferPercent ...uint8) error {
+	if len(maxCounterBufferPercent) > 1 {
+		return fmt.Errorf("too many args passed, expected 0 or 1")
+	}
+	if len(maxCounterBufferPercent) == 1 {
+		if maxCounterBufferPercent[0] > 99 {
+			return fmt.Errorf("invalid maxCounterBufferPercent")
+		}
+		ws.TradingRateLimiter.MaxCounter = ws.TradingRateLimiter.UnbufferedMaxCounter * (100 - int32(maxCounterBufferPercent[0])) / 100
+	}
+	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(false, true) {
+		return fmt.Errorf("trading rate-limiter was already initialized")
+	}
+
+	return nil
+}
+
+// StopTradingRateLimiter stops self rate-limiting for "order" type WebSocket
+// methods.
+func (ws *WebSocketManager) StopTradingRateLimiter() error {
+	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(true, false) {
+		return fmt.Errorf("trading rate-limiter was already stopped or never initialized")
+	}
+	return nil
+}
+
+// #endregion
+
+// #region Exported methods for WebSocket Connection (Connect<>, WaitForConnect)
 
 // Creates both authenticated and public connections to Kraken WebSocket server.
 // Use ConnectPublic() or ConnectPrivate() instead if only channel type is needed.
@@ -170,20 +461,6 @@ func (kc *KrakenClient) ConnectPublic(systemStatusCallback func(status string)) 
 	return nil
 }
 
-// Helper method that initializes WebSocketClient for public endpoints by
-// dialing Kraken's server and starting its message reader.
-func (kc *KrakenClient) connectPublic() error {
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
-	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
-	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
-	if err != nil {
-		return fmt.Errorf("error dialing kraken public url | %w", err)
-	}
-	kc.WebSocketManager.ConnectWaitGroup.Add(1)
-	kc.WebSocketManager.WebSocketClient.startMessageReader(wsPublicURL)
-	return nil
-}
-
 // Connects to the private WebSocket endpoints of the Kraken API and initializes
 // WebSocketClient. Calls the unexported helper method connectPrivate to establish
 // the connection. If the connection is successful, it sets the SystemStatusCallback
@@ -212,38 +489,12 @@ func (kc *KrakenClient) ConnectPrivate(systemStatusCallback func(status string))
 	return nil
 }
 
-// Helper method that initializes WebSocketClient for private endpoints by
-// getting an authenticated WebSocket token, dialing Kraken's server and starting
-// its message reader. Starts a loop to attempt reauthentication if an error is
-// encountered during those operations.
-func (kc *KrakenClient) connectPrivate() error {
-	err := kc.AuthenticateWebSockets()
-	if err != nil {
-		if errors.Is(err, errNoInternetConnection) {
-			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
-			kc.reauthenticate()
-		} else if errors.Is(err, err403Forbidden) {
-			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
-			kc.reauthenticate()
-		} else {
-			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
-		}
-	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
-	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
-	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
-	if err != nil {
-		return fmt.Errorf("error dialing kraken private url | %w", err)
-	}
-	kc.WebSocketManager.ConnectWaitGroup.Add(1)
-	kc.WebSocketManager.AuthWebSocketClient.startMessageReader(wsPrivateURL)
-	return nil
-}
-
 // WaitForConnect blocks until the WebSocketManager has established all connections
-// as confirmed by a "systemStatus" "online" message received from Kraken's
-// WebSocket server, or until a timeout of 5 seconds has passed. It returns an
-// error if the timeout is reached before all connections are established.
+// as confirmed by a "systemStatus" message (regardless of status) received from
+// the WebSocket server, or until a timeout of 5 seconds has passed. It returns an
+// error if the timeout is reached before all connections are established. If
+// performing specific operations depending on system status message received is
+// desired, write a systemStatusCallback func passed to the Connect() method instead.
 // Intended to use to wait until connections are confirmed before subscribing to
 // Kraken's WebSocket channels. Accepts none or one optional arg passed to
 // 'timeoutMilliseconds' which is the number of milliseconds until this method
@@ -279,119 +530,9 @@ func (ws *WebSocketManager) WaitForConnect(timeoutMilliseconds ...uint16) error 
 	}
 }
 
-// Iterates through all open public and private subscriptions and sends an
-// unsubscribe message to Kraken's WebSocket server for each. Accepts 0 or 1
-// optional arg 'reqID' request ID to send with all Unsubscribe<channel> methods
-//
-// # Example Usage:
-//
-//	err := kc.UnsubscribeAll()
-func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
-	var err error
-	if len(reqID) > 1 {
-		return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
-	}
+// #endregion
 
-	ws.SubscriptionMgr.Mutex.Lock()
-	defer ws.SubscriptionMgr.Mutex.Unlock()
-
-	// iterate over all active subscriptions stored in SubscriptionMgr and call
-	// corresponding Unsubscribe<channel> method
-	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
-		switch channelName {
-		case "ownTrades":
-			if len(reqID) > 0 {
-				err = ws.UnsubscribeOwnTrades(UnsubscribeOwnTradesReqID(reqID[0]))
-			} else {
-				err = ws.UnsubscribeOwnTrades()
-			}
-			if err != nil {
-				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
-			}
-		case "openOrders":
-			if len(reqID) > 0 {
-				err = ws.UnsubscribeOpenOrders(UnsubscribeOpenOrdersReqID(reqID[0]))
-			} else {
-				err = ws.UnsubscribeOpenOrders()
-			}
-			if err != nil {
-				return fmt.Errorf("error unsubscribing from openorders | %w", err)
-			}
-		default:
-			return fmt.Errorf("unknown channel name %s", channelName)
-		}
-	}
-	for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
-		switch {
-		case channelName == "ticker":
-			for pair := range pairMap {
-				if len(reqID) > 0 {
-					err = ws.UnsubscribeTicker(pair, ReqID(reqID[0]))
-				} else {
-					err = ws.UnsubscribeTicker(pair)
-				}
-				if err != nil {
-					return fmt.Errorf("error unsubscribing from ticker | %w", err)
-				}
-			}
-		case channelName == "trade":
-			for pair := range pairMap {
-				if len(reqID) > 0 {
-					err = ws.UnsubscribeTrade(pair, ReqID(reqID[0]))
-				} else {
-					err = ws.UnsubscribeTrade(pair)
-				}
-				if err != nil {
-					return fmt.Errorf("error unsubscribing from trade | %w", err)
-				}
-			}
-		case channelName == "spread":
-			for pair := range pairMap {
-				if len(reqID) > 0 {
-					err = ws.UnsubscribeSpread(pair, ReqID(reqID[0]))
-				} else {
-					err = ws.UnsubscribeSpread(pair)
-				}
-				if err != nil {
-					return fmt.Errorf("error unsubscribing from spread | %w", err)
-				}
-			}
-		case strings.HasPrefix(channelName, "ohlc"):
-			_, intervalStr, _ := strings.Cut(channelName, "-")
-			interval, err := strconv.ParseUint(intervalStr, 10, 16)
-			if err != nil {
-				return fmt.Errorf("error parsing uint from interval | %w", err)
-			}
-			for pair := range pairMap {
-				if len(reqID) > 0 {
-					err = ws.UnsubscribeOHLC(pair, uint16(interval), ReqID(reqID[0]))
-				} else {
-					err = ws.UnsubscribeOHLC(pair, uint16(interval))
-				}
-				if err != nil {
-					return fmt.Errorf("error unsubscribing from ohlc | %w", err)
-				}
-			}
-		case strings.HasPrefix(channelName, "book"):
-			_, depthStr, _ := strings.Cut(channelName, "-")
-			depth, err := strconv.ParseUint(depthStr, 10, 16)
-			if err != nil {
-				return fmt.Errorf("error parsing uint from depth | %w", err)
-			}
-			for pair := range pairMap {
-				if len(reqID) > 0 {
-					err = ws.UnsubscribeBook(pair, uint16(depth), ReqID(reqID[0]))
-				} else {
-					err = ws.UnsubscribeBook(pair, uint16(depth))
-				}
-				if err != nil {
-					return fmt.Errorf("error unsubscribing from book | %w", err)
-				}
-			}
-		}
-	}
-	return nil
-}
+// #region Exported methods for Subscriptions (Subscribe<Channel>, Unsubscribe<Channel>, WaitForSubscriptions)
 
 // Subscribes to "ticker" WebSocket channel for arg 'pair'. May pass a valid
 // function to arg 'callback' to dictate what to do with incoming data to the
@@ -858,85 +999,6 @@ func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16, options .
 	return nil
 }
 
-// StartOrderBookManager changes the flag for ws.OrderBookMgr to signal new
-// SubscribeBook() subscription calls to track the current state of book in memory.
-// Does not apply to already existing subscriptions, unsubscribe and resubscribe
-// as necessary.
-func (ws *WebSocketManager) StartOrderBookManager() error {
-	if !ws.OrderBookMgr.isTracking.CompareAndSwap(false, true) {
-		return fmt.Errorf("OrderBookManager already running")
-	}
-	return nil
-}
-
-// StopOrderBookManager changes the flag for ws.OrderBookMgr to signal new
-// SubscribeBook() subscription calls not to track the current state of book
-// in memory. Does not apply to already existing subscriptions, unsubscribe
-// and resubscribe as necessary.
-func (ws *WebSocketManager) StopOrderBookManager() error {
-	if !ws.OrderBookMgr.isTracking.CompareAndSwap(true, false) {
-		return fmt.Errorf("OrderBookManager already stopped")
-	}
-	return nil
-}
-
-// GetBookState returns a BookState struct which holds pointers to both Bids
-// and Asks slices for current state of book for arg 'pair' and specified 'depth'.
-//
-// Note: This method should only be called when current state of book is being
-// managed by the WebSocketManager within the KrakenClient instance (when
-// StartOrderBookManager() method was called before subscription). This method
-// will throw an error if no subscriptions were made after StartOrderBookManager()
-// was called.
-//
-// CAUTION: As this method returns pointers to the Asks and Bids fields, any
-// modification done directly to Asks or Bids will likely result in an error and
-// cause the WebSocketManager to unsubscribe from this channel. If modification
-// to these slices is desired, either make a copy from reference or use ListAsks()
-// and ListBids() instead.
-func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, error) {
-	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
-		return BookState{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
-	}
-	ob := BookState{
-		Asks: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks,
-		Bids: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids,
-	}
-	return ob, nil
-}
-
-// ListAsks returns a copy of the Asks slice which holds the current state of the order
-// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
-// for larger lists ('depth').
-//
-// Note: This method should only be called when current state of book is being
-// managed by the WebSocketManager within the KrakenClient instance (when
-// StartOrderBookManager() method was called before subscription). This method
-// will throw an error if no subscriptions were made after StartOrderBookManager()
-// was called.
-func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookEntry, error) {
-	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
-		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
-	}
-	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks...), nil
-}
-
-// ListBids returns a copy of the Bids slice which holds the current state of the order
-// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
-// for larger lists ('depth').
-//
-// Note: This method should only be called when current state of book is being
-// managed by the WebSocketManager within the KrakenClient instance (when
-// StartOrderBookManager() method was called before subscription). This method
-// will throw an error if no subscriptions were made after StartOrderBookManager()
-// was called.
-func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error) {
-	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
-		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
-	}
-	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
-}
-
 // Subscribes to "ownTrades" authenticated WebSocket channel. May pass either
 // a valid function to arg 'callback' to dictate what to do with incoming data
 // to the channel or pass a nil callback if you choose to read/handle channel
@@ -1107,421 +1169,6 @@ func (ws *WebSocketManager) UnsubscribeOpenOrders(options ...UnsubscribeOpenOrde
 	return nil
 }
 
-// StartTradeLogger() starts a trade logger which opens, or creates if not exists,
-// a file with 'filename' and writes all incoming trades from an "ownTrades"
-// WebSocket channel subscription in json lines format. Suggested to call this
-// method before SubscribeOwnTrades(). If errors occur, will log the errors
-// to ErrorLogger (defaults to stdout if none is set) also structures the error
-// message and logs it to the TradeLogger file.
-//
-// Note: Ignores "snapshot" trades
-//
-// # Example Usage:
-//
-//	err := kc.StartTradeLogger("todays_trades.jsonl")
-//	ownTradesCallback := func(ownTradesData interface{}) {
-//		// Don't need to do anything extra here for trades to be logged
-//		log.Println("an executed trade was logged by the logger!")
-//	}
-//	kc.SubscribeOwnTrades(ownTradesCallback, krakenspot.WithoutSnapshot())
-//	// deferred function to close "todays_trades.log" in event of panic or shutdown
-//	defer func() {
-//		if r := recover(); r != nil {
-//			fmt.Println("Recovered from panic:", r)
-//		}
-//		err := kc.StopTradeLogger()
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//	}()
-func (ws *WebSocketManager) StartTradeLogger(filename string) error {
-	if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
-		return errors.New("tradeLogger is already running")
-	}
-
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
-	if err != nil {
-		return fmt.Errorf("error opening file %s | %w", filename, err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	ws.Mutex.Lock()
-	ws.TradeLogger = &TradeLogger{
-		file:       file,
-		writer:     bufio.NewWriter(file),
-		ch:         make(chan map[string]WSOwnTrade, 100),
-		seqErrorCh: make(chan error),
-		seq:        0,
-		startSeq:   1,
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-	ws.TradeLogger.isLogging.Store(true)
-	ws.Mutex.Unlock()
-	ws.TradeLogger.wg.Add(1)
-
-	go func(ctx context.Context) {
-		defer ws.TradeLogger.wg.Done()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case trade, ok := <-ws.TradeLogger.ch:
-				if !ok {
-					return
-				}
-				tradeJson, err := json.Marshal(trade)
-				if err != nil {
-					ws.handleTradeLoggerError("error marshalling WSOwnTrade to JSON", err, trade)
-					continue
-				}
-				_, err = ws.TradeLogger.writer.WriteString(string(tradeJson) + "\n")
-				if err != nil {
-					ws.handleTradeLoggerError("error writing trade JSON to string", err, trade)
-					continue
-				}
-				err = ws.TradeLogger.writer.Flush()
-				if err != nil {
-					ws.handleTradeLoggerError("error flushing writer", err, trade)
-				}
-			case err, ok := <-ws.TradeLogger.seqErrorCh:
-				if !ok {
-					return
-				}
-				ws.handleTradeLoggerError("sequence error", err, nil)
-			}
-		}
-	}(ctx)
-
-	return nil
-}
-
-// Waits until go routine finishes writing trades to file then closes TradeLogger
-// channel and Tradelogger file. Recommended to call this method explicitly and/or
-// inside of a defer func to ensure file close is triggered. Logic within this
-// method is behind an atomic.bool check, so calling this method multiple times
-// should not cause any issues in your program.
-//
-// # Example Usage:
-//
-//	// Create the WebSocketManager and start the TradeLogger
-//	err := kc.StartTradeLogger("trades.log")
-//	// Defer a function to recover from a panic and call StopTradeLogger() for "trades.log" file closure
-//	defer func() {
-//		if r := recover(); r != nil {
-//			fmt.Println("Recovered from panic:", r)
-//		}
-//		err := ws.StopTradeLogger()
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//	}()
-//	//...Your program logic here...//
-//	// Listen for shutdown signals
-//	shutdown := make(chan os.Signal, 1)
-//	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
-//	// Wait for a shutdown signal
-//	<-shutdown
-func (ws *WebSocketManager) StopTradeLogger() error {
-	if ws.TradeLogger == nil {
-		return fmt.Errorf("trade logger never initialized, call StartTradeLogger() method")
-	}
-	if ws.TradeLogger.isLogging.CompareAndSwap(true, false) {
-		ws.TradeLogger.cancel()
-		close(ws.TradeLogger.ch)
-		close(ws.TradeLogger.seqErrorCh)
-		ws.TradeLogger.wg.Wait()
-		return ws.TradeLogger.file.Close()
-	}
-	return fmt.Errorf("trade logger is already stopped")
-}
-
-// Helper method to structure error messages and log them to both the TradeLogger
-// file and to ErrorLogger.
-func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err error, trade map[string]WSOwnTrade) {
-	ws.ErrorLogger.Println(errorMessage + " | " + err.Error())
-	errorLog := map[string]string{
-		"error":   err.Error(),
-		"message": errorMessage,
-		"trade":   fmt.Sprintf("%+v", trade),
-	}
-	errorLogJson, err := json.Marshal(errorLog)
-	if err != nil {
-		ws.ErrorLogger.Println("error marshalling errorLog to JSON | ", err)
-		return
-	}
-	_, err = ws.TradeLogger.writer.WriteString(string(errorLogJson) + "\n")
-	if err != nil {
-		ws.ErrorLogger.Println("error writing errorLogJson to string | ", err)
-	}
-}
-
-// Starts the open orders manager. Call this method before SubscribeOpenOrders().
-// It will build initial state of all currently open orders and maintain it in
-// memory as new open order update messages come in.
-//
-// # Example Usage:
-//
-//	// Print current state of open orders every 15 seconds
-//	err := kc.StartOpenOrderManager()
-//	if err != nil...
-//	err := kc.SubscribeOpenOrders()
-//	if err != nil...
-//	ticker := time.NewTicker(time.Second * 15)
-//	for range ticker.C {
-//		orders := kc.MapOpenOrders()
-//		log.Println(orders)
-//	}
-func (ws *WebSocketManager) StartOpenOrderManager() error {
-	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
-		return fmt.Errorf("OpenOrderManager is already running")
-	} else if ws.OpenOrdersMgr == nil {
-		ws.OpenOrdersMgr = &OpenOrderManager{
-			OpenOrders: make(map[string]WSOpenOrder),
-			ch:         make(chan (WSOpenOrdersResp)),
-			seq:        0,
-		}
-		ws.OpenOrdersMgr.isTracking.Store(true)
-		go ws.startOpenOrderManager()
-	} else if ws.OpenOrdersMgr.isTracking.CompareAndSwap(false, true) {
-		ws.OpenOrdersMgr.ch = make(chan WSOpenOrdersResp)
-		ws.OpenOrdersMgr.seq = 0
-		go ws.startOpenOrderManager()
-	} else {
-		return fmt.Errorf("an error occurred starting OpenOrderManager")
-	}
-
-	return nil
-}
-
-// Helper function meant to be run as a go routine. Starts a loop that reads
-// from ws.OpenOrdersMgr.ch and either builds the initial state of the currently
-// open orders or it updates the state removing and adding orders as necessary
-func (ws *WebSocketManager) startOpenOrderManager() {
-	ws.OpenOrdersMgr.wg.Add(1)
-	defer ws.OpenOrdersMgr.wg.Done()
-
-	for data := range ws.OpenOrdersMgr.ch {
-		if data.Sequence != ws.OpenOrdersMgr.seq+1 {
-			ws.ErrorLogger.Println("improper open orders sequence, shutting down go routine")
-			return
-		} else {
-			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
-			if ws.OpenOrdersMgr.seq == 1 {
-				// Build initial state of open orders
-				for _, order := range data.OpenOrders {
-					for orderID, orderInfo := range order {
-						ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
-					}
-				}
-			} else {
-				// Update state of open orders
-				for _, order := range data.OpenOrders {
-					for orderID, orderInfo := range order {
-						if orderInfo.Status == "pending" {
-							ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
-						} else if orderInfo.Status == "open" {
-							order := ws.OpenOrdersMgr.OpenOrders[orderID]
-							order.Status = "open"
-							ws.OpenOrdersMgr.OpenOrders[orderID] = order
-						} else if orderInfo.Status == "closed" {
-							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
-						} else if orderInfo.Status == "canceled" {
-							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
-// Stops the internal tracking of current open orders. Closes channel and clears
-// the internal OpenOrders map.
-func (ws *WebSocketManager) StopOpenOrderManager() error {
-	if ws.OpenOrdersMgr == nil {
-		return fmt.Errorf("OpenOrderManager never initialized, call StartOpenOrderManager() method")
-	}
-	if ws.OpenOrdersMgr.isTracking.CompareAndSwap(true, false) {
-		close(ws.OpenOrdersMgr.ch)
-		ws.OpenOrdersMgr.wg.Wait()
-		// clear map
-		ws.OpenOrdersMgr.Mutex.Lock()
-		ws.OpenOrdersMgr.OpenOrders = nil
-		ws.OpenOrdersMgr.Mutex.Unlock()
-		return nil
-	}
-	return fmt.Errorf("OpenOrderManager is already stopped")
-}
-
-// Returns a map of the current state of open orders managed by StartOpenOrderManager().
-func (ws *WebSocketManager) MapOpenOrders() map[string]WSOpenOrder {
-	ws.OpenOrdersMgr.Mutex.RLock()
-	defer ws.OpenOrdersMgr.Mutex.RUnlock()
-	return ws.OpenOrdersMgr.OpenOrders
-}
-
-// Returns a slice of all currently open orders for arg 'pair' sorted ascending
-// by price.
-func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSOpenOrder, error) {
-	var openOrders []map[string]WSOpenOrder
-	ws.OpenOrdersMgr.Mutex.RLock()
-	for id, order := range ws.OpenOrdersMgr.OpenOrders {
-		if order.Description.Pair == pair {
-			newOrder := make(map[string]WSOpenOrder)
-			newOrder[id] = order
-			openOrders = append(openOrders, newOrder)
-		}
-	}
-	ws.OpenOrdersMgr.Mutex.RUnlock()
-	sort.Slice(openOrders, func(i, j int) bool {
-		for id1 := range openOrders[i] {
-			for id2 := range openOrders[j] {
-				dec1, err := decimal.NewFromString(openOrders[i][id1].Description.Price)
-				if err != nil {
-					ws.ErrorLogger.Println("error converting string to decimal")
-				}
-				dec2, err := decimal.NewFromString(openOrders[j][id2].Description.Price)
-				if err != nil {
-					ws.ErrorLogger.Println("error converting string to decimal")
-				}
-				return dec1.Cmp(dec2) < 0
-			}
-		}
-		return false
-	})
-	return openOrders, nil
-}
-
-// LogOpenorders creates or opens a file with arg 'filename' and writes the
-// current state of the open orders to the file in json lines format. Accepts
-// one optional boolean arg 'overwrite'. If false, clears old file if it exists
-// and writes new data to file. If true, appends the current data to the old file
-// if it already exists. Defaults to false if no 'overwrite' value is passed.
-//
-// # Example Usage:
-//
-// Example 1: Defers LogOpenOrders on main() return or panic
-//
-//	kc.StartOpenOrderManager()
-//	kc.SubscribeOpenOrders(openOrdersCallback)
-//	defer func() {
-//		err := kc.LogOpenOrders("open_orders.jsonl", true)
-//		if err != nil {
-//			fmt.Println("Error logging orders:", err)
-//		}
-//	}()
-//	defer func() {
-//		if r := recover(); r != nil {
-//			panic(r) // re-throw panic after Order logging
-//		}
-//	}()
-//
-// Example 2: Create channel and call LogOpenOrders() on shutdown signal
-//
-//	kc.StartOpenOrderManager()
-//	kc.SubscribeOpenOrders(openOrdersCallback)
-//	sigs := make(chan os.Signal, 1)
-//	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-//	// Start a goroutine that will perform cleanup when the program is interrupted
-//	go func() {
-//		<-sigs
-//		err := kc.LogOpenOrders("open_orders.jsonl", true)
-//		if err != nil {
-//			fmt.Println("Error logging orders:", err)
-//		}
-//		os.Exit(0)
-//	}()
-func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) error {
-	// Check if OpenOrders manager is valid and running
-	if ws.OpenOrdersMgr == nil || !ws.OpenOrdersMgr.isTracking.Load() {
-		return fmt.Errorf("open orders manager is not currently running, start with StartOpenOrderManager()")
-	}
-
-	// Create or open file
-	var file *os.File
-	var err error
-	if len(overwrite) > 0 {
-		if len(overwrite) > 1 {
-			return fmt.Errorf("too many args passed to ListOpenOrders(). Expected 1 or 2")
-		}
-		if !overwrite[0] {
-			file, err = os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-			if err != nil {
-				return fmt.Errorf("error opening file | %w", err)
-			}
-		} else {
-			file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
-			if err != nil {
-				return fmt.Errorf("error opening file | %w", err)
-			}
-			err = file.Truncate(0)
-			if err != nil {
-				return fmt.Errorf("error truncating file | %w", err)
-			}
-		}
-	} else {
-		file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
-		if err != nil {
-			return fmt.Errorf("error opening file | %w", err)
-		}
-		err = file.Truncate(0)
-		if err != nil {
-			return fmt.Errorf("error truncating file | %w", err)
-		}
-	}
-	defer file.Close()
-
-	ws.OpenOrdersMgr.Mutex.RLock()
-	defer ws.OpenOrdersMgr.Mutex.RUnlock()
-
-	// Build map of open orders by pair and sorted by price ascending
-	logOrders := make(map[string][]map[string]WSOpenOrder)
-	for orderID, order := range ws.OpenOrdersMgr.OpenOrders {
-		if _, ok := logOrders[order.Description.Pair]; !ok {
-			logOrders[order.Description.Pair] = make([]map[string]WSOpenOrder, 0, 60)
-			newMap := make(map[string]WSOpenOrder)
-			newMap[orderID] = order
-			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], newMap)
-		} else { // pair exists in logOrders
-			// Insert new entry by price ascending
-			i := sort.Search(len(logOrders[order.Description.Pair]), func(i int) bool {
-				var p1 decimal.Decimal
-				var p2 decimal.Decimal
-				for id := range logOrders[order.Description.Pair][i] {
-					p1, err = decimal.NewFromString(logOrders[order.Description.Pair][i][id].Description.Price)
-					if err != nil {
-						ws.ErrorLogger.Println("error converting decimal to string |", err)
-					}
-				}
-				p2, err := decimal.NewFromString(order.Description.Price)
-				if err != nil {
-					ws.ErrorLogger.Println("error converting decimal to string |", err)
-				}
-				return p1.Cmp(p2) >= 0
-			})
-			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], map[string]WSOpenOrder{})
-			copy(logOrders[order.Description.Pair][i+1:], logOrders[order.Description.Pair][i:])
-			newMap := make(map[string]WSOpenOrder)
-			newMap[orderID] = order
-			logOrders[order.Description.Pair][i] = newMap
-		}
-	}
-	for _, orders := range logOrders {
-		for _, order := range orders {
-			jsonOrder, err := json.Marshal(order)
-			if err != nil {
-				return fmt.Errorf("error marshalling order | %w", err)
-			}
-			_, err = file.WriteString(string(jsonOrder) + "\n")
-			if err != nil {
-				return fmt.Errorf("error writing to file | %w", err)
-			}
-		}
-	}
-	return nil
-}
-
 // WaitForSubscriptions blocks until all subscriptions (both private and public)
 // by the WebSocketManager have received a "subscribed" event type message
 // from Kraken WebSocket server or until a timeout of 5 seconds has passed.
@@ -1567,9 +1214,123 @@ func (ws *WebSocketManager) WaitForSubscriptions(timeoutMilliseconds ...uint16) 
 	}
 }
 
+// Iterates through all open public and private subscriptions and sends an
+// unsubscribe message to Kraken's WebSocket server for each. Accepts 0 or 1
+// optional arg 'reqID' request ID to send with all Unsubscribe<channel> methods
+//
+// # Example Usage:
+//
+//	err := kc.UnsubscribeAll()
+func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
+	var err error
+	if len(reqID) > 1 {
+		return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
+	}
+
+	ws.SubscriptionMgr.Mutex.Lock()
+	defer ws.SubscriptionMgr.Mutex.Unlock()
+
+	// iterate over all active subscriptions stored in SubscriptionMgr and call
+	// corresponding Unsubscribe<channel> method
+	for channelName := range ws.SubscriptionMgr.PrivateSubscriptions {
+		switch channelName {
+		case "ownTrades":
+			if len(reqID) > 0 {
+				err = ws.UnsubscribeOwnTrades(UnsubscribeOwnTradesReqID(reqID[0]))
+			} else {
+				err = ws.UnsubscribeOwnTrades()
+			}
+			if err != nil {
+				return fmt.Errorf("error unsubscribing from owntrades | %w", err)
+			}
+		case "openOrders":
+			if len(reqID) > 0 {
+				err = ws.UnsubscribeOpenOrders(UnsubscribeOpenOrdersReqID(reqID[0]))
+			} else {
+				err = ws.UnsubscribeOpenOrders()
+			}
+			if err != nil {
+				return fmt.Errorf("error unsubscribing from openorders | %w", err)
+			}
+		default:
+			return fmt.Errorf("unknown channel name %s", channelName)
+		}
+	}
+	for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
+		switch {
+		case channelName == "ticker":
+			for pair := range pairMap {
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeTicker(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeTicker(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from ticker | %w", err)
+				}
+			}
+		case channelName == "trade":
+			for pair := range pairMap {
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeTrade(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeTrade(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from trade | %w", err)
+				}
+			}
+		case channelName == "spread":
+			for pair := range pairMap {
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeSpread(pair, ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeSpread(pair)
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from spread | %w", err)
+				}
+			}
+		case strings.HasPrefix(channelName, "ohlc"):
+			_, intervalStr, _ := strings.Cut(channelName, "-")
+			interval, err := strconv.ParseUint(intervalStr, 10, 16)
+			if err != nil {
+				return fmt.Errorf("error parsing uint from interval | %w", err)
+			}
+			for pair := range pairMap {
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeOHLC(pair, uint16(interval), ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeOHLC(pair, uint16(interval))
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from ohlc | %w", err)
+				}
+			}
+		case strings.HasPrefix(channelName, "book"):
+			_, depthStr, _ := strings.Cut(channelName, "-")
+			depth, err := strconv.ParseUint(depthStr, 10, 16)
+			if err != nil {
+				return fmt.Errorf("error parsing uint from depth | %w", err)
+			}
+			for pair := range pairMap {
+				if len(reqID) > 0 {
+					err = ws.UnsubscribeBook(pair, uint16(depth), ReqID(reqID[0]))
+				} else {
+					err = ws.UnsubscribeBook(pair, uint16(depth))
+				}
+				if err != nil {
+					return fmt.Errorf("error unsubscribing from book | %w", err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // #endregion
 
-// #region Exported *WebSocketManager Order methods (addOrder, editOrder, cancelOrder(s), Start/StopTradingRateLimiter)
+// #region Exported methods for WSOrders  (addOrder, editOrder, cancelOrder(s), TradingRateLimiter, LimitChase)
 
 // Sets OrderStatusCallback to the function passed to arg 'orderStatus'. This
 // function determines the behavior of the program when orderStatus type
@@ -2253,74 +2014,238 @@ func (ws *WebSocketManager) CancelLimitChase(userRef int32) error {
 	return nil
 }
 
-// StartTradingRateLimiter starts self rate-limiting for "order" type WebSocket
-// methods. The "order" type methods include WSAddOrder(), WSEditOrder(),
-// WSCancelOrder(), and WSCancelOrders(). Must have an active subscription to
-// "openOrders" channel with SubscribeOpenOrders() before sending any orders
-// for self rate-limiting logic to work correctly.
+// #endregion
+
+// #region Exported methods for Features interacting with *WebSocketManager   ()
+
+// GetBookState returns a BookState struct which holds pointers to both Bids
+// and Asks slices for current state of book for arg 'pair' and specified 'depth'.
 //
-// Note: It's recommended to start open orders internal management with
-// StartOpenOrderManager() before subscribing to "openOrders" channel. If open
-// order manager is not started before subscribing, rate-limiter for edit
-// orders will default to assuming a max incremement penalty and cancel orders
-// will simply skip rate-limiting logic. Accepts one or none optional arg
-// passed to 'maxCounterBufferPercent' which is a percent of the total max
-// counter for your verification tier that will act as a buffer to attempt to
-// avoid exceeding max counter rate when multiple order methods for the same
-// pair are called consecutively and race to pass the rate-limit check.
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
 //
-// Note: Activating self rate-limiting may add significant processing overhead
-// and waits and only attempts to prevent hitting the max. It is likely better to
-// implement rate-limiting yourself and/or design your strategy not to approach
-// rate-limits.
+// CAUTION: As this method returns pointers to the Asks and Bids fields, any
+// modification done directly to Asks or Bids will likely result in an error and
+// cause the WebSocketManager to unsubscribe from this channel. If modification
+// to these slices is desired, either make a copy from reference or use ListAsks()
+// and ListBids() instead.
+func (ws *WebSocketManager) GetBookState(pair string, depth uint16) (BookState, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return BookState{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	ob := BookState{
+		Asks: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks,
+		Bids: &ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids,
+	}
+	return ob, nil
+}
+
+// ListAsks returns a copy of the Asks slice which holds the current state of the order
+// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
+// for larger lists ('depth').
 //
-// # Enum:
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
+func (ws *WebSocketManager) ListAsks(pair string, depth uint16) ([]InternalBookEntry, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Asks...), nil
+}
+
+// ListBids returns a copy of the Bids slice which holds the current state of the order
+// book for arg 'pair' and specified 'depth'. May be less performant than GetBookState()
+// for larger lists ('depth').
 //
-// 'maxCounterBufferPercent' - [0..99]
+// Note: This method should only be called when current state of book is being
+// managed by the WebSocketManager within the KrakenClient instance (when
+// StartOrderBookManager() method was called before subscription). This method
+// will throw an error if no subscriptions were made after StartOrderBookManager()
+// was called.
+func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookEntry, error) {
+	if _, ok := ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair]; !ok {
+		return []InternalBookEntry{}, fmt.Errorf("error encountered | book for pair %s and depth %v does not exist; check inputs and/or subscriptions and try again", pair, depth)
+	}
+	return append([]InternalBookEntry(nil), ws.OrderBookMgr.OrderBooks[fmt.Sprintf("book-%v", depth)][pair].Bids...), nil
+}
+
+// Returns a map of the current state of open orders managed by StartOpenOrderManager().
+func (ws *WebSocketManager) MapOpenOrders() map[string]WSOpenOrder {
+	ws.OpenOrdersMgr.Mutex.RLock()
+	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+	return ws.OpenOrdersMgr.OpenOrders
+}
+
+// Returns a slice of all currently open orders for arg 'pair' sorted ascending
+// by price.
+func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSOpenOrder, error) {
+	var openOrders []map[string]WSOpenOrder
+	ws.OpenOrdersMgr.Mutex.RLock()
+	for id, order := range ws.OpenOrdersMgr.OpenOrders {
+		if order.Description.Pair == pair {
+			newOrder := make(map[string]WSOpenOrder)
+			newOrder[id] = order
+			openOrders = append(openOrders, newOrder)
+		}
+	}
+	ws.OpenOrdersMgr.Mutex.RUnlock()
+	sort.Slice(openOrders, func(i, j int) bool {
+		for id1 := range openOrders[i] {
+			for id2 := range openOrders[j] {
+				dec1, err := decimal.NewFromString(openOrders[i][id1].Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting string to decimal")
+				}
+				dec2, err := decimal.NewFromString(openOrders[j][id2].Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting string to decimal")
+				}
+				return dec1.Cmp(dec2) < 0
+			}
+		}
+		return false
+	})
+	return openOrders, nil
+}
+
+// LogOpenorders creates or opens a file with arg 'filename' and writes the
+// current state of the open orders to the file in json lines format. Accepts
+// one optional boolean arg 'overwrite'. If false, clears old file if it exists
+// and writes new data to file. If true, appends the current data to the old file
+// if it already exists. Defaults to false if no 'overwrite' value is passed.
 //
 // # Example Usage:
 //
-// Note: error assignment and handling omitted throughout
+// Example 1: Defers LogOpenOrders on main() return or panic
 //
-//	// Creates new client, connects, starts required features for rate-limiting
-//	// with a 20% buffer, subscribes, and sends an order
-//	kc := NewKrakenClient(apikey, apisecret, 2)
-//	kc.ConnectPrivate()
 //	kc.StartOpenOrderManager()
-//	kc.StartTradingRateLimiter(20)
 //	kc.SubscribeOpenOrders(openOrdersCallback)
-//	// send orders as needed
-//	kc.WSAddOrder(krakenspot.WSLimit("42100.20"), "buy", "1.0", "XBT/USD", krakenspot.WSPostOnly(), krakenspot.WSCloseLimit("44000"))
-//	// etc...
-func (ws *WebSocketManager) StartTradingRateLimiter(maxCounterBufferPercent ...uint8) error {
-	if len(maxCounterBufferPercent) > 1 {
-		return fmt.Errorf("too many args passed, expected 0 or 1")
+//	defer func() {
+//		err := kc.LogOpenOrders("open_orders.jsonl", true)
+//		if err != nil {
+//			fmt.Println("Error logging orders:", err)
+//		}
+//	}()
+//	defer func() {
+//		if r := recover(); r != nil {
+//			panic(r) // re-throw panic after Order logging
+//		}
+//	}()
+//
+// Example 2: Create channel and call LogOpenOrders() on shutdown signal
+//
+//	kc.StartOpenOrderManager()
+//	kc.SubscribeOpenOrders(openOrdersCallback)
+//	sigs := make(chan os.Signal, 1)
+//	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+//	// Start a goroutine that will perform cleanup when the program is interrupted
+//	go func() {
+//		<-sigs
+//		err := kc.LogOpenOrders("open_orders.jsonl", true)
+//		if err != nil {
+//			fmt.Println("Error logging orders:", err)
+//		}
+//		os.Exit(0)
+//	}()
+func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) error {
+	// Check if OpenOrders manager is valid and running
+	if ws.OpenOrdersMgr == nil || !ws.OpenOrdersMgr.isTracking.Load() {
+		return fmt.Errorf("open orders manager is not currently running, start with StartOpenOrderManager()")
 	}
-	if len(maxCounterBufferPercent) == 1 {
-		if maxCounterBufferPercent[0] > 99 {
-			return fmt.Errorf("invalid maxCounterBufferPercent")
+
+	// Create or open file
+	var file *os.File
+	var err error
+	if len(overwrite) > 0 {
+		if len(overwrite) > 1 {
+			return fmt.Errorf("too many args passed to ListOpenOrders(). Expected 1 or 2")
 		}
-		ws.TradingRateLimiter.MaxCounter = ws.TradingRateLimiter.UnbufferedMaxCounter * (100 - int32(maxCounterBufferPercent[0])) / 100
+		if !overwrite[0] {
+			file, err = os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+			if err != nil {
+				return fmt.Errorf("error opening file | %w", err)
+			}
+		} else {
+			file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
+			if err != nil {
+				return fmt.Errorf("error opening file | %w", err)
+			}
+			err = file.Truncate(0)
+			if err != nil {
+				return fmt.Errorf("error truncating file | %w", err)
+			}
+		}
+	} else {
+		file, err = os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0666)
+		if err != nil {
+			return fmt.Errorf("error opening file | %w", err)
+		}
+		err = file.Truncate(0)
+		if err != nil {
+			return fmt.Errorf("error truncating file | %w", err)
+		}
 	}
-	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(false, true) {
-		return fmt.Errorf("trading rate-limiter was already initialized")
+	defer file.Close()
+
+	ws.OpenOrdersMgr.Mutex.RLock()
+	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+
+	// Build map of open orders by pair and sorted by price ascending
+	logOrders := make(map[string][]map[string]WSOpenOrder)
+	for orderID, order := range ws.OpenOrdersMgr.OpenOrders {
+		if _, ok := logOrders[order.Description.Pair]; !ok {
+			logOrders[order.Description.Pair] = make([]map[string]WSOpenOrder, 0, 60)
+			newMap := make(map[string]WSOpenOrder)
+			newMap[orderID] = order
+			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], newMap)
+		} else { // pair exists in logOrders
+			// Insert new entry by price ascending
+			i := sort.Search(len(logOrders[order.Description.Pair]), func(i int) bool {
+				var p1 decimal.Decimal
+				var p2 decimal.Decimal
+				for id := range logOrders[order.Description.Pair][i] {
+					p1, err = decimal.NewFromString(logOrders[order.Description.Pair][i][id].Description.Price)
+					if err != nil {
+						ws.ErrorLogger.Println("error converting decimal to string |", err)
+					}
+				}
+				p2, err := decimal.NewFromString(order.Description.Price)
+				if err != nil {
+					ws.ErrorLogger.Println("error converting decimal to string |", err)
+				}
+				return p1.Cmp(p2) >= 0
+			})
+			logOrders[order.Description.Pair] = append(logOrders[order.Description.Pair], map[string]WSOpenOrder{})
+			copy(logOrders[order.Description.Pair][i+1:], logOrders[order.Description.Pair][i:])
+			newMap := make(map[string]WSOpenOrder)
+			newMap[orderID] = order
+			logOrders[order.Description.Pair][i] = newMap
+		}
 	}
-
-	return nil
-}
-
-// StopTradingRateLimiter stops self rate-limiting for "order" type WebSocket
-// methods.
-func (ws *WebSocketManager) StopTradingRateLimiter() error {
-	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(true, false) {
-		return fmt.Errorf("trading rate-limiter was already stopped or never initialized")
+	for _, orders := range logOrders {
+		for _, order := range orders {
+			jsonOrder, err := json.Marshal(order)
+			if err != nil {
+				return fmt.Errorf("error marshalling order | %w", err)
+			}
+			_, err = file.WriteString(string(jsonOrder) + "\n")
+			if err != nil {
+				return fmt.Errorf("error writing to file | %w", err)
+			}
+		}
 	}
 	return nil
 }
 
 // #endregion
 
-// #region *WebSocketManager helper methods (subscribe, readers, routers, trading rate-limiter, limit-chase)
+// #region helper methods for *WebSocketManager Functionality (subscribe, readers, routers, trading rate-limiter, limit-chase)
 
 // Helper method for public data subscribe methods to handle initializing
 // Subscription, sending payload to server, and starting go routine with
@@ -2864,40 +2789,6 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 	return nil
 }
 
-// tradingRateLimit is a helper method that waits for the counter to decrement
-// if adding 'incrementAmount' to the counter for specified 'pair' would go over
-// the max counter amount for the user's verification tier.
-func (ws *WebSocketManager) tradingRateLimit(pair string, incrementAmount int32) {
-	if _, ok := ws.TradingRateLimiter.Counters[pair]; ok {
-		for ws.TradingRateLimiter.Counters[pair].Load()+incrementAmount >= ws.TradingRateLimiter.MaxCounter {
-			ws.ErrorLogger.Println("Counter will exceed rate limit. Waiting")
-			ws.TradingRateLimiter.CounterDecayConds[pair].Wait()
-		}
-	}
-}
-
-// startTradeRateLimiter is a go routine method which starts a timer that decays
-// kc.APICounter every second by the amount in kc.APICounterDecay. Stops at 0.
-func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
-	ticker := time.NewTicker(time.Millisecond * time.Duration(ws.TradingRateLimiter.CounterDecay))
-	defer ticker.Stop()
-	for range ticker.C {
-		test := atomic.Int32{}
-		test.Load()
-		ws.TradingRateLimiter.Mutex.Lock()
-		if ws.TradingRateLimiter.Counters[pair].Load() > 0 {
-			ws.TradingRateLimiter.Counters[pair].Add(-1)
-			if ws.TradingRateLimiter.Counters[pair].Load() == 0 {
-				ticker.Stop()
-				ws.TradingRateLimiter.Mutex.Unlock()
-				return
-			}
-		}
-		ws.TradingRateLimiter.Mutex.Unlock()
-		ws.TradingRateLimiter.CounterDecayConds[pair].Broadcast()
-	}
-}
-
 // closeAndDeleteLimitChase is a helper method to safely close the data channel
 // of a LimitChase order, remove it from the LimitChaseOrders map, and call the
 // closeCallback if one was provided on LimitChase creation. It takes a pointer
@@ -3122,7 +3013,149 @@ func (ws *WebSocketManager) updateLimitChase(lc *LimitChase, newPrice decimal.De
 
 // #endregion
 
-// #region Connection helper methods (dialKraken, reconnect, reauthenticate)
+// #region helper methods for *WebSocketManager Features (TradeLogger, OpenOrderManager, TradingRateLimiter)
+
+// Helper method to structure error messages and log them to both the TradeLogger
+// file and to ErrorLogger.
+func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err error, trade map[string]WSOwnTrade) {
+	ws.ErrorLogger.Println(errorMessage + " | " + err.Error())
+	errorLog := map[string]string{
+		"error":   err.Error(),
+		"message": errorMessage,
+		"trade":   fmt.Sprintf("%+v", trade),
+	}
+	errorLogJson, err := json.Marshal(errorLog)
+	if err != nil {
+		ws.ErrorLogger.Println("error marshalling errorLog to JSON | ", err)
+		return
+	}
+	_, err = ws.TradeLogger.writer.WriteString(string(errorLogJson) + "\n")
+	if err != nil {
+		ws.ErrorLogger.Println("error writing errorLogJson to string | ", err)
+	}
+}
+
+// startOpenOrderManager() is a helper function meant to be run as a go routine. Starts a loop that reads
+// from ws.OpenOrdersMgr.ch and either builds the initial state of the currently
+// open orders or it updates the state removing and adding orders as necessary
+func (ws *WebSocketManager) startOpenOrderManager() {
+	ws.OpenOrdersMgr.wg.Add(1)
+	defer ws.OpenOrdersMgr.wg.Done()
+
+	for data := range ws.OpenOrdersMgr.ch {
+		if data.Sequence != ws.OpenOrdersMgr.seq+1 {
+			ws.ErrorLogger.Println("improper open orders sequence, shutting down go routine")
+			return
+		} else {
+			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
+			if ws.OpenOrdersMgr.seq == 1 {
+				// Build initial state of open orders
+				for _, order := range data.OpenOrders {
+					for orderID, orderInfo := range order {
+						ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
+					}
+				}
+			} else {
+				// Update state of open orders
+				for _, order := range data.OpenOrders {
+					for orderID, orderInfo := range order {
+						if orderInfo.Status == "pending" {
+							ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
+						} else if orderInfo.Status == "open" {
+							order := ws.OpenOrdersMgr.OpenOrders[orderID]
+							order.Status = "open"
+							ws.OpenOrdersMgr.OpenOrders[orderID] = order
+						} else if orderInfo.Status == "closed" {
+							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
+						} else if orderInfo.Status == "canceled" {
+							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// tradingRateLimit is a helper method that waits for the counter to decrement
+// if adding 'incrementAmount' to the counter for specified 'pair' would go over
+// the max counter amount for the user's verification tier.
+func (ws *WebSocketManager) tradingRateLimit(pair string, incrementAmount int32) {
+	if _, ok := ws.TradingRateLimiter.Counters[pair]; ok {
+		for ws.TradingRateLimiter.Counters[pair].Load()+incrementAmount >= ws.TradingRateLimiter.MaxCounter {
+			ws.ErrorLogger.Println("Counter will exceed rate limit. Waiting")
+			ws.TradingRateLimiter.CounterDecayConds[pair].Wait()
+		}
+	}
+}
+
+// startTradeRateLimiter is a go routine method which starts a timer that decays
+// kc.APICounter every second by the amount in kc.APICounterDecay. Stops at 0.
+func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
+	ticker := time.NewTicker(time.Millisecond * time.Duration(ws.TradingRateLimiter.CounterDecay))
+	defer ticker.Stop()
+	for range ticker.C {
+		test := atomic.Int32{}
+		test.Load()
+		ws.TradingRateLimiter.Mutex.Lock()
+		if ws.TradingRateLimiter.Counters[pair].Load() > 0 {
+			ws.TradingRateLimiter.Counters[pair].Add(-1)
+			if ws.TradingRateLimiter.Counters[pair].Load() == 0 {
+				ticker.Stop()
+				ws.TradingRateLimiter.Mutex.Unlock()
+				return
+			}
+		}
+		ws.TradingRateLimiter.Mutex.Unlock()
+		ws.TradingRateLimiter.CounterDecayConds[pair].Broadcast()
+	}
+}
+
+// #endregion
+
+// #region helper methods for Connections  (connect, dialKraken, reconnect, reauthenticate)
+
+// Helper method that initializes WebSocketClient for public endpoints by
+// dialing Kraken's server and starting its message reader.
+func (kc *KrakenClient) connectPublic() error {
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
+	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
+	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
+	if err != nil {
+		return fmt.Errorf("error dialing kraken public url | %w", err)
+	}
+	kc.WebSocketManager.ConnectWaitGroup.Add(1)
+	kc.WebSocketManager.WebSocketClient.startMessageReader(wsPublicURL)
+	return nil
+}
+
+// Helper method that initializes WebSocketClient for private endpoints by
+// getting an authenticated WebSocket token, dialing Kraken's server and starting
+// its message reader. Starts a loop to attempt reauthentication if an error is
+// encountered during those operations.
+func (kc *KrakenClient) connectPrivate() error {
+	err := kc.AuthenticateWebSockets()
+	if err != nil {
+		if errors.Is(err, errNoInternetConnection) {
+			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
+			kc.reauthenticate()
+		} else if errors.Is(err, err403Forbidden) {
+			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
+			kc.reauthenticate()
+		} else {
+			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
+		}
+	}
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
+	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
+	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
+	if err != nil {
+		return fmt.Errorf("error dialing kraken private url | %w", err)
+	}
+	kc.WebSocketManager.ConnectWaitGroup.Add(1)
+	kc.WebSocketManager.AuthWebSocketClient.startMessageReader(wsPrivateURL)
+	return nil
+}
 
 // Attempts reconnect with dialKraken() method. Retries 5 times instantly then
 // scales back to attempt reconnect once every ~8 seconds.
@@ -3209,7 +3242,7 @@ func (c *WebSocketClient) dialKraken(url string) error {
 
 // #endregion
 
-// #region *Subscription helper methods (confirm, close, unsubscribe, and constructor)
+// #region helper methods for *Subscription  (confirm, close, unsubscribe, and constructor)
 
 // Completes unsubscribing by sending a message to s.DoneChan.
 func (s *Subscription) unsubscribe() {
@@ -3247,7 +3280,7 @@ func newSub(channelName, pair string, callback GenericCallback) *Subscription {
 
 // #endregion
 
-// #region *InternalOrderBook helper methods (bookCallback, unsubscribe, close, buildInitial, checksum, update)
+// #region helper methods for *InternalOrderBook  (bookCallback, unsubscribe, close, buildInitial, checksum, update)
 
 func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16, callback GenericCallback) func(data interface{}) {
 	return func(data interface{}) {
@@ -3554,7 +3587,7 @@ func (ob *InternalOrderBook) buildInitialBook(msg *WSOrderBookSnapshot) error {
 
 // #endregion
 
-// #region Helper functions
+// #region helper functions
 
 // Converts Price Volume and Time string fields from WSBookEntry to decimal.decimal
 // type, initializes InternalBookEntry type with the decimal.decimal values and

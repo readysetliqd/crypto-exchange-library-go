@@ -1,3 +1,22 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The constants.go file includes variables and constants user for managing
+// connections, subscriptions, and interactions with the Kraken API. They
+// include base URLs, WebSocket URLs, public and private channel names,
+// order channel events, general message events, valid directions, and
+// map sizes for pairs, assets, and tickers.
+//
+// The API rate limiter constants are used to manage the rate of API calls
+// to the Kraken server, ensuring that the application adheres to Kraken's
+// rate limits. These include decay rates, maximum counters, and trading
+// decay rates for different tiers.
+//
+// Error definitions are also included to handle specific error scenarios
+// that may occur during the operation of the application.
 package krakenspot
 
 import "errors"
@@ -10,10 +29,6 @@ const (
 	wsPublicURL   = "wss://ws.kraken.com"
 	wsPrivateURL  = "wss://ws-auth.kraken.com"
 )
-
-// const (
-// 	wsTimeoutDuration = time.Second * 10
-// )
 
 // #region WebSocket constants
 

@@ -1,3 +1,14 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The krakenclient.go file specifically contains the declaration of data structs
+// for the client, the client constructor function, and a method to set an error
+// logger. It plays a crucial role in establishing and managing interactions
+// with Kraken's WebSocket server, including subscribing to public and private
+// channels and sending orders.
 package krakenspot
 
 import (
@@ -162,7 +173,6 @@ type Subscription struct {
 
 type GenericCallback func(data interface{})
 
-// TODO remove handleratelimit and docstrings referring to it
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier', but
 // this value is only used if any self rate-limiting features are activated with

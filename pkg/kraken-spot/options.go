@@ -1,3 +1,16 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The options.go file in this package implements the "functional options"
+// pattern. It contains functions that provide optional configurations for both
+// WebSocket and REST API methods throughout the package. These functions
+// allow for flexible and clear configuration of various API calls, enhancing
+// the usability and readability of the package. Each contains notes from
+// Kraken's API docs where relevant and necessary cautions on mutual exclusivity
+// between functions.
 package krakenspot
 
 import (

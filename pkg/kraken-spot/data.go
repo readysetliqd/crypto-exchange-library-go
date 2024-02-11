@@ -1,3 +1,14 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// The data.go file specifically contains the data structure declarations for
+// incoming Kraken WebSocket and REST API JSON messages. It also includes
+// necessary custom json.Unmarshal functions where required. Additionally, it
+// holds data structures for internal package features, playing a crucial role
+// in managing and interpreting data from the Kraken Spot Exchange API.
 package krakenspot
 
 import (

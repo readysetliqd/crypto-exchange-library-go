@@ -1,3 +1,14 @@
+// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
+// Spot Exchange API. It enables WebSocket and REST API interactions, including
+// subscription to both public and private channels. The package provides a
+// client for initiating these interactions and a state manager for handling
+// them.
+//
+// This file, public-api.go, contains the implementation of the public REST API
+// functions. Unlike other files in this package, they do not require the
+// creation of a KrakenClient, making them suitable for quick and independent
+// queries. Each function corresponds to a specific endpoint of Kraken's public
+// API, and returns the data in a structured format for easy consumption.
 package krakenspot
 
 import (
