@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 var sharedClient = &http.Client{
@@ -74,6 +75,7 @@ type WebSocketManager struct {
 	OpenOrdersMgr        *OpenOrderManager
 	TradingRateLimiter   *TradingRateLimiter
 	LimitChaseMgr        *LimitChaseManager
+	BalanceMgr           *BalanceManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
 	ConnectWaitGroup     sync.WaitGroup
@@ -159,6 +161,21 @@ type LimitChaseManager struct {
 	Mutex            sync.RWMutex
 }
 
+type BalanceManager struct {
+	Balances    map[string]decimal.Decimal
+	CurrencyMap map[string]BaseQuoteCurrency
+	ch          chan WSOwnTrade
+	isActive    bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mutex       sync.RWMutex
+}
+
+type BaseQuoteCurrency struct {
+	Base  string
+	Quote string
+}
+
 type Subscription struct {
 	ChannelName         string
 	Pair                string
@@ -236,6 +253,9 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenC
 		ErrorLogger: logger,
 		LimitChaseMgr: &LimitChaseManager{
 			LimitChaseOrders: make(map[int32]*LimitChase),
+		},
+		BalanceMgr: &BalanceManager{
+			isActive: false,
 		},
 	}
 	kc.OrderBookMgr.isTracking.Store(false)

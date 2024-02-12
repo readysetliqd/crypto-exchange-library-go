@@ -33,10 +33,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO package level comment and file specific comments
-// TODO reorganize code in order of calling. Start<Features>; Connect; Subscribe; SendOrders
-// TODO reorganize helper methods to their own regions
-// TODO add balance manager
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
 // TODO add trading rate limit to REST API calls
 
@@ -311,6 +307,156 @@ func (ws *WebSocketManager) StopTradingRateLimiter() error {
 	if !ws.TradingRateLimiter.HandleRateLimit.CompareAndSwap(true, false) {
 		return fmt.Errorf("trading rate-limiter was already stopped or never initialized")
 	}
+	return nil
+}
+
+// StartBalanceManager gets current account balances from Kraken's REST API
+// and loads them into memory, then it starts a go routine which listens for
+// completed trades from the "ownTrades" WebSocket channel and updates the
+// balances accordingly. Must be used with an open subscription to "ownTrades"
+// channel. This feature only tracks total balances. It does not track available
+// balances for trading.
+//
+// Note: Recommended use is to call SubscribeOwnTrades passing WithoutSnapshot
+// to 'options' before StartBalanceManager as the snapshot message from the
+// "ownTrades" channel will cause balances to be inaccurate. If snapshot message
+// is required for some other reason, then call StartBalanceManager after
+// SubscribeOwnTrades and before any trading occurs.
+func (kc *KrakenClient) StartBalanceManager() error {
+	bm := kc.WebSocketManager.BalanceMgr
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+
+	// Check if BalanceManager is already running
+	if bm.isActive {
+		return fmt.Errorf("BalanceMgr already started")
+	}
+
+	// Get and convert initial balances to decimals, insert them into Balances field
+	startingBalances, err := kc.GetAccountBalances()
+	if err != nil {
+		return fmt.Errorf("error getting initial balances from REST API")
+	}
+	if bm.Balances == nil {
+		bm.Balances = make(map[string]decimal.Decimal, len(*startingBalances))
+	}
+	if bm.CurrencyMap == nil {
+		bm.CurrencyMap = make(map[string]BaseQuoteCurrency)
+	}
+	for currency, balance := range *startingBalances {
+		decBalance, err := decimal.NewFromString(balance)
+		if err != nil {
+			return fmt.Errorf("error converting initial balance to decimal")
+		}
+		bm.Balances[currency] = decBalance
+	}
+
+	// Initialize channel and start receiver go routine to process and update balances
+	bm.ch = make(chan WSOwnTrade)
+	ctx, cancel := context.WithCancel(context.Background())
+	bm.ctx = ctx
+	bm.cancel = cancel
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				bm.mutex.Lock()
+				bm.isActive = false
+				close(bm.ch)
+				bm.mutex.Unlock()
+				return
+			case data := <-bm.ch:
+				bm.mutex.Lock()
+
+				// Add pair to currency map if not exists
+				_, ok := bm.CurrencyMap[data.Pair]
+				if !ok {
+					pairInfo, err := kc.GetTradeablePairsInfo(data.Pair)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Printf("error getting tradeable pairs info for %s, internal balances may be incorrect", data.Pair)
+					} else {
+						for _, pair := range *pairInfo {
+							newCurrency := BaseQuoteCurrency{
+								Base:  pair.Base,
+								Quote: pair.Quote,
+							}
+							bm.CurrencyMap[data.Pair] = newCurrency
+							break
+						}
+					}
+				}
+				currency := bm.CurrencyMap[data.Pair]
+
+				// Add and subtract vol, cost, and fees from balances
+				switch data.Direction {
+				case "buy":
+					decVol, err := decimal.NewFromString(data.Volume)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting volume from string to decimal, internal balances may be incorrect")
+					} else {
+						// add vol to currency base balance
+						if _, ok := bm.Balances[currency.Base]; ok { // balance exists, add
+							bm.Balances[currency.Base] = bm.Balances[currency.Base].Add(decVol)
+						} else { // balance doesn't exist, initialize
+							bm.Balances[currency.Base] = decVol
+						}
+					}
+					decCost, err := decimal.NewFromString(data.QuoteCost)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting cost from string to decimal, internal balances may be incorrect")
+					} else {
+						// subtract cost from currency quote balance
+						if _, ok := bm.Balances[currency.Quote]; ok { // balance exists, substract
+							bm.Balances[currency.Quote] = bm.Balances[currency.Quote].Sub(decCost)
+						} else { // balance doesn't exist, initialize (it should exist or this will be negative)
+							kc.WebSocketManager.ErrorLogger.Println("error finding balance for quote currency, initializing negative balance")
+							bm.Balances[currency.Quote] = decCost.Neg()
+						}
+					}
+					// subtract fee from currency quote balance
+					decFee, err := decimal.NewFromString(data.QuoteFee)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting fee from string to decimal, internal balances may be incorrect")
+					} else {
+						bm.Balances[currency.Quote] = bm.Balances[currency.Quote].Sub(decFee)
+					}
+				case "sell":
+					decVol, err := decimal.NewFromString(data.Volume)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting volume from string to decimal, internal balances may be incorrect")
+					} else {
+						// subtract vol from currency base balance
+						if _, ok := bm.Balances[currency.Base]; ok { // balance exists, subtract
+							bm.Balances[currency.Base] = bm.Balances[currency.Base].Sub(decVol)
+						} else { // balance doesn't exist, initialize (it should exist or this will be negative)
+							kc.WebSocketManager.ErrorLogger.Println("error finding balance for base currency, initializing negative balance")
+							bm.Balances[currency.Base] = decVol.Neg()
+						}
+					}
+					decCost, err := decimal.NewFromString(data.QuoteCost)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting cost from string to decimal, internal balances may be incorrect")
+					} else {
+						// add cost to currency quote balance
+						if _, ok := bm.Balances[currency.Quote]; ok { // balance exists, add
+							bm.Balances[currency.Quote] = bm.Balances[currency.Quote].Add(decCost)
+						} else { // balance doesn't exist, initialize
+							bm.Balances[currency.Quote] = decCost
+						}
+					}
+					// subtract fee from currency quote balance
+					decFee, err := decimal.NewFromString(data.QuoteFee)
+					if err != nil {
+						kc.WebSocketManager.ErrorLogger.Println("error converting fee from string to decimal, internal balances may be incorrect")
+					} else {
+						bm.Balances[currency.Quote] = bm.Balances[currency.Quote].Sub(decFee)
+					}
+				}
+				bm.mutex.Unlock()
+			}
+		}
+	}()
+	bm.isActive = true
 	return nil
 }
 
@@ -2243,6 +2389,34 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 	return nil
 }
 
+// AssetBalance retrieves total decimal balance for arg 'asset' when balance manager
+// is active. Must be called after StartBalanceManager. Returns an error if
+// either balance manager is not active or if 'asset' is not found.
+//
+// Note: Many assets have different tickers in Kraken's system than those listed
+// in their currency pairs, use GetTradablePairsInfo to verify correct asset
+// ticker's to pass to 'asset'.
+func (ws *WebSocketManager) AssetBalance(asset string) (decimal.Decimal, error) {
+	if ws.BalanceMgr.Balances != nil && ws.BalanceMgr.isActive {
+		if bal, ok := ws.BalanceMgr.Balances[asset]; !ok {
+			return decimal.Zero, fmt.Errorf("balance for asset %s not found", asset)
+		} else {
+			return bal, nil
+		}
+	}
+	return decimal.Zero, fmt.Errorf("error finding balance manager, use StartBalanceManager before calling this method")
+}
+
+// AssetBalances retrieves a map for all total asset balances managed internally
+// when balance manager is active. Must be called after StartBalanceManager.
+// Returns an error if balance manager is not active.
+func (ws *WebSocketManager) AssetBalances() (map[string]decimal.Decimal, error) {
+	if ws.BalanceMgr.Balances != nil && ws.BalanceMgr.isActive {
+		return ws.BalanceMgr.Balances, nil
+	}
+	return nil, fmt.Errorf("error finding balance manager, use StartBalanceManager before calling this method")
+}
+
 // #endregion
 
 // #region helper methods for *WebSocketManager Functionality (subscribe, readers, routers, trading rate-limiter, limit-chase)
@@ -2364,9 +2538,11 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
+						// process user defined callback
 						if sub.Callback != nil {
 							sub.Callback(data)
 						}
+						// send to trade logger if it is running
 						if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
 							ownTrades, ok := data.(WSOwnTradesResp)
 							if !ok {
@@ -2383,6 +2559,21 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 								}
 							}
 						}
+						// send to balance manager if it is running
+						ws.BalanceMgr.mutex.RLock()
+						if ws.BalanceMgr.isActive {
+							ownTrades, ok := data.(WSOwnTradesResp)
+							if !ok {
+								ws.ErrorLogger.Println("error asserting data to WSOwnTradesResp")
+							} else {
+								for _, o := range ownTrades.OwnTrades {
+									for _, t := range o {
+										ws.BalanceMgr.ch <- t
+									}
+								}
+							}
+						}
+						ws.BalanceMgr.mutex.RUnlock()
 					}
 				case <-sub.DoneChan:
 					if sub.DoneChanClosed == 0 { // channel is open
