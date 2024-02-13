@@ -59,19 +59,11 @@ func (e *DefaultEvent) Process() error {
 }
 
 // TODO write docstrings
-func (kc *KrakenClient) StartStateManager(currentState ...State) error {
-	var state State = nil
-	if len(currentState) > 0 {
-		if len(currentState) > 1 {
-			return fmt.Errorf("too many args, expected 0 or 1")
-		}
-		state = kc.currentState
-	}
+func (kc *KrakenClient) StartStateManager() {
 	kc.StateManager = &StateManager{
-		currentState: state,
+		currentState: nil,
 		states:       make(map[string]State),
 	}
-	return nil
 }
 
 // TODO write docstrings
