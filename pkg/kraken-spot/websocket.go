@@ -461,6 +461,17 @@ func (kc *KrakenClient) StartBalanceManager() error {
 	return nil
 }
 
+// StopBalanceManager stops balance manager feature by changing its flag to
+// false and calling its context cancel function. Returns an error if balance
+// manager is already stopped.
+func (ws *WebSocketManager) StopBalanceManager() error {
+	if !ws.BalanceMgr.isActive {
+		return fmt.Errorf("error stopping balance manager, balance manager already stopped or never active")
+	}
+	ws.BalanceMgr.cancel()
+	return nil
+}
+
 // #endregion
 
 // #region Exported methods for WebSocket Connection (Connect<>, WaitForConnect)
