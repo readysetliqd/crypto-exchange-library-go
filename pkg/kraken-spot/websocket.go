@@ -34,6 +34,7 @@ import (
 )
 
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
+// TODO test if go routine resource leak when unsubscribing, do goroutines shut?
 // TODO add trading rate limit to REST API calls
 
 // #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
@@ -2955,7 +2956,9 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			if publicChannelNames[v.ChannelName] {
 				ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].unsubscribe()
 				if strings.HasPrefix(v.ChannelName, "book") {
-					ws.OrderBookMgr.OrderBooks[v.ChannelName][v.Pair].unsubscribe()
+					if ws.OrderBookMgr.isTracking.Load() {
+						ws.OrderBookMgr.OrderBooks[v.ChannelName][v.Pair].unsubscribe()
+					}
 				}
 			} else if privateChannelNames[v.ChannelName] {
 				ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].unsubscribe()
