@@ -21,7 +21,7 @@ type State interface {
 	Enter()
 	Exit()
 	Update(ctx context.Context)
-	HandleEvent(event Event)
+	HandleEvent(event Event) error
 }
 
 type DefaultState struct{}
@@ -41,9 +41,10 @@ func (s *DefaultState) Update(ctx context.Context) {
 	fmt.Println("Updating state...")
 }
 
-func (s *DefaultState) HandleEvent(event Event) {
+func (s *DefaultState) HandleEvent(event Event) error {
 	// Do nothing. Placeholder implementation
 	fmt.Println("Handling event...")
+	return nil
 }
 
 type Event interface {
@@ -59,38 +60,47 @@ func (e *DefaultEvent) Process() error {
 }
 
 // TODO write docstrings
-func (kc *KrakenClient) StartStateManager() {
+func (kc *KrakenClient) StartStateManager() *StateManager {
 	kc.StateManager = &StateManager{
 		currentState: nil,
+		PrevState:    nil,
 		states:       make(map[string]State),
 	}
+	return kc.StateManager
 }
 
 // TODO write docstrings
 func (sm *StateManager) AddState(stateName string, state State) {
-	sm.Mutex.Lock()
+	sm.mutex.Lock()
 	sm.states[stateName] = state
-	sm.Mutex.Unlock()
+	sm.mutex.Unlock()
 }
 
 // TODO write docstrings
 func (sm *StateManager) SetState(state State) {
-	sm.Mutex.Lock()
+	sm.mutex.Lock()
 	if sm.currentState != nil {
+		sm.PrevState = sm.currentState
 		sm.currentState.Exit()
 	}
 	sm.currentState = state
-	sm.Mutex.Unlock()
+	sm.mutex.Unlock()
 	sm.currentState.Enter()
 }
 
 // TODO write docstrings
 func (sm *StateManager) GetState(stateName string) (State, error) {
-	sm.Mutex.RLock()
-	defer sm.Mutex.RUnlock()
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
 	state, ok := sm.states[stateName]
 	if !ok {
 		return nil, fmt.Errorf("state with name \"%s\" does not exist in map, check spelling and use AddState() if necessary", stateName)
 	}
 	return state, nil
+}
+
+func (sm *StateManager) CurrentState() State {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	return sm.currentState
 }

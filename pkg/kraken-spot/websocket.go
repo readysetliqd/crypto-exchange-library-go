@@ -2550,10 +2550,6 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
-						// process user defined callback
-						if sub.Callback != nil {
-							sub.Callback(data)
-						}
 						// send to trade logger if it is running
 						if ws.TradeLogger != nil && ws.TradeLogger.isLogging.Load() {
 							ownTrades, ok := data.(WSOwnTradesResp)
@@ -2586,6 +2582,10 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 							}
 						}
 						ws.BalanceMgr.mutex.RUnlock()
+						// process user defined callback
+						if sub.Callback != nil {
+							sub.Callback(data)
+						}
 					}
 				case <-sub.DoneChan:
 					if sub.DoneChanClosed == 0 { // channel is open
@@ -2615,9 +2615,6 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
-						if sub.Callback != nil {
-							sub.Callback(data)
-						}
 						openOrders, ok := data.(WSOpenOrdersResp)
 						if !ok {
 							ws.ErrorLogger.Println("error asserting data to WSOpenOrdersResp")
@@ -2641,6 +2638,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 									}
 								}
 							}
+						}
+						if sub.Callback != nil {
+							sub.Callback(data)
 						}
 					}
 				case <-sub.DoneChan:

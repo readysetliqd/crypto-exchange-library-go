@@ -143,7 +143,8 @@ type OpenOrderManager struct {
 type StateManager struct {
 	states       map[string]State
 	currentState State
-	Mutex        sync.RWMutex
+	PrevState    State
+	mutex        sync.RWMutex
 }
 
 type TradingRateLimiter struct {
