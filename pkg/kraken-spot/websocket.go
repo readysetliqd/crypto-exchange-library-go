@@ -2409,6 +2409,8 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 // in their currency pairs, use GetTradablePairsInfo to verify correct asset
 // ticker's to pass to 'asset'.
 func (ws *WebSocketManager) AssetBalance(asset string) (decimal.Decimal, error) {
+	ws.BalanceMgr.mutex.RLock()
+	defer ws.BalanceMgr.mutex.RUnlock()
 	if ws.BalanceMgr.Balances != nil && ws.BalanceMgr.isActive {
 		if bal, ok := ws.BalanceMgr.Balances[asset]; !ok {
 			return decimal.Zero, fmt.Errorf("balance for asset %s not found", asset)
@@ -2423,6 +2425,8 @@ func (ws *WebSocketManager) AssetBalance(asset string) (decimal.Decimal, error) 
 // when balance manager is active. Must be called after StartBalanceManager.
 // Returns an error if balance manager is not active.
 func (ws *WebSocketManager) AssetBalances() (map[string]decimal.Decimal, error) {
+	ws.BalanceMgr.mutex.RLock()
+	defer ws.BalanceMgr.mutex.RUnlock()
 	if ws.BalanceMgr.Balances != nil && ws.BalanceMgr.isActive {
 		return ws.BalanceMgr.Balances, nil
 	}

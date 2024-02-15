@@ -1604,7 +1604,7 @@ type WSOwnTrade struct {
 	QuoteFee      string `json:"fee"`
 	Volume        string `json:"vol"`
 	InitialMargin string `json:"margin"`
-	UserRef       int    `json:"userref"`
+	UserRef       int32  `json:"userref"`
 }
 
 type WSOpenOrdersResp struct {
