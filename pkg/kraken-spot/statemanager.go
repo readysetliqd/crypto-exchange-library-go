@@ -18,7 +18,7 @@ import (
 )
 
 type State interface {
-	Enter()
+	enter()
 	Exit()
 	Update(ctx context.Context)
 	HandleEvent(event Event) error
@@ -85,7 +85,7 @@ func (sm *StateManager) SetState(state State) {
 	}
 	sm.currentState = state
 	sm.mutex.Unlock()
-	sm.currentState.Enter()
+	sm.currentState.enter()
 }
 
 // TODO write docstrings

@@ -2301,7 +2301,7 @@ func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSO
 //	kc.StartOpenOrderManager()
 //	kc.SubscribeOpenOrders(openOrdersCallback)
 //	sigs := make(chan os.Signal, 1)
-//	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+//	signal.Notify(sigs, os.Interrupt)
 //	// Start a goroutine that will perform cleanup when the program is interrupted
 //	go func() {
 //		<-sigs
