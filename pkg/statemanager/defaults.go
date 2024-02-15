@@ -30,7 +30,7 @@ func (s *DefaultState) HandleEvent(ctx context.Context, event Event, responChan 
 
 type DefaultEvent struct{}
 
-func (e *DefaultEvent) Process() error {
+func (e *DefaultEvent) Process(ctx context.Context) error {
 	// Do nothing. Placeholder implementation
 	fmt.Println("Processing event...")
 	return nil
