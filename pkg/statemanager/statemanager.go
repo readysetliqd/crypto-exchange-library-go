@@ -1,16 +1,10 @@
-// TODO fix package and file level comments
-// Package krakenspot is a comprehensive toolkit for interfacing with the Kraken
-// Spot Exchange API. It enables WebSocket and REST API interactions, including
-// subscription to both public and private channels. The package provides a
-// client for initiating these interactions and a state manager for handling
-// them.
+// Package statemanager provides a basic framework for managing states in a
+// concurrent-safe manner intended for use with the crypto exchange APIs throughout
+// this repo.
 //
-// The statemanager.go file specifically contains the implementation of the
-// state manager, which is used to manage the state of the KrakenClient. It
-// includes the declaration of the State and Event interfaces, their default
-// implementations, and the methods for adding, setting, and getting states.
-// This file plays a crucial role in managing the state of interactions with
-// the Kraken Spot Exchange API.
+// This file, statemanager.go, contains the implementation of this package. It
+// includes the definition of states, events, and their handlers, as well as
+// the management of state transitions.
 package statemanager
 
 import (
@@ -22,11 +16,13 @@ import (
 
 // #region data structures
 
+// SMSystem is a system that manages multiple StateManagers.
 type SMSystem struct {
 	stateManagers map[int32]*StateManager
 	mutex         sync.RWMutex
 }
 
+// StateManager manages the states and transitions of a single instance.
 type StateManager struct {
 	states       map[string]State
 	currentState State
@@ -38,6 +34,7 @@ type StateManager struct {
 	mutex        sync.RWMutex
 }
 
+// State represents a state in the state machine.
 type State interface {
 	Enter(prevState State)
 	Exit(nextState State)
@@ -45,15 +42,16 @@ type State interface {
 	HandleEvent(ctx context.Context, event Event, responseChan chan interface{}) error
 }
 
+// Event represents an event that can trigger state transitions or actions.
 type Event interface {
 	Process(ctx context.Context) error
 }
 
 // #endregion
 
-// #region Instantiation and settup of state mangagement/managers/states
+// #region Instantiation and setup of state mangagement/managers/states
 
-// TODO write docstrings
+// StartStateManagement initializes a new SMSystem and returns its pointer.
 func StartStateManagement() *SMSystem {
 	sms := &SMSystem{
 		stateManagers: make(map[int32]*StateManager),
@@ -61,7 +59,8 @@ func StartStateManagement() *SMSystem {
 	return sms
 }
 
-// TODO write docstrings
+// NewStateManager creates a new StateManager for a given instance and adds it
+// to the SMSystem.
 func (sms *SMSystem) NewStateManager(instanceID int32) *StateManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	stateManager := &StateManager{
@@ -79,7 +78,7 @@ func (sms *SMSystem) NewStateManager(instanceID int32) *StateManager {
 	return stateManager
 }
 
-// TODO write docstrings
+// AddState adds a new state to the StateManager.
 func (sm *StateManager) AddState(stateName string, state State) {
 	sm.mutex.Lock()
 	sm.states[stateName] = state
@@ -90,7 +89,8 @@ func (sm *StateManager) AddState(stateName string, state State) {
 
 // #region State getter methods
 
-// TODO write docstrings
+// GetState returns a state from the StateManager by its name 'stateName' or
+// returns an error if it one hasn't been added by that name.
 func (sm *StateManager) GetState(stateName string) (State, error) {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
@@ -101,12 +101,14 @@ func (sm *StateManager) GetState(stateName string) (State, error) {
 	return state, nil
 }
 
+// CurrentState returns the current state of the StateManager.
 func (sm *StateManager) CurrentState() State {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
 	return sm.currentState
 }
 
+// PreviousState returns the previous state of the StateManager.
 func (sm *StateManager) PreviousState() State {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
@@ -117,7 +119,7 @@ func (sm *StateManager) PreviousState() State {
 
 // #region State operation methods
 
-// TODO write docstrings
+// SetState sets the current state of the StateManager to the given state.
 func (sm *StateManager) SetState(state State) {
 	sm.mutex.Lock()
 	if sm.currentState != nil {
@@ -129,7 +131,8 @@ func (sm *StateManager) SetState(state State) {
 	sm.currentState.Enter(sm.prevState)
 }
 
-// TODO write docstrings
+// Run starts the main loop of the StateManager, which handles events and
+// updates the current state.
 func (sm *StateManager) Run() {
 	for {
 		select {
@@ -147,34 +150,41 @@ func (sm *StateManager) Run() {
 	}
 }
 
+// SendEvent sends an event to the StateManager's event channel.
 func (sm *StateManager) SendEvent(event Event) {
-	sm.eventChan <- event // send the event to the channel
+	sm.eventChan <- event
 }
 
+// ReceiveResponse receives a response from the StateManager's response channel
+// and returns it.
 func (sm *StateManager) ReceiveResponse() interface{} {
-	return <-sm.responseChan // receive the response from the channel
+	return <-sm.responseChan
 }
 
 // #endregion
 
 // #region Context methods
 
+// Cancel cancels the context of the StateManager, effectively stopping it.
 func (sm *StateManager) Cancel() {
 	sm.cancel()
 }
 
+// WithValue adds a value to the StateManager's context.
 func (sm *StateManager) WithValue(key, val interface{}) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 	sm.ctx = context.WithValue(sm.ctx, key, val)
 }
 
+// WithDeadline sets a deadline on the StateManager's context.
 func (sm *StateManager) WithDeadline(deadline time.Time) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 	sm.ctx, sm.cancel = context.WithDeadline(sm.ctx, deadline)
 }
 
+// WithTimeout sets a timeout on the StateManager's context.
 func (sm *StateManager) WithTimeout(timeout time.Duration) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
