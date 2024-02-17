@@ -44,10 +44,11 @@ var sharedClient = &http.Client{
 }
 
 type KrakenClient struct {
-	APIKey      string
-	APISecret   []byte
-	Client      *http.Client
-	ErrorLogger *log.Logger
+	APIKey        string
+	APISecret     []byte
+	Client        *http.Client
+	ErrorLogger   *log.Logger
+	autoReconnect bool
 
 	*APIManager
 	*WebSocketManager
@@ -78,29 +79,40 @@ type WebSocketManager struct {
 	BalanceMgr           *BalanceManager
 	SystemStatusCallback func(status string)
 	OrderStatusCallback  func(orderStatus interface{})
-	ConnectWaitGroup     sync.WaitGroup
+	ConnectWaitGroup     *sync.WaitGroup
 	ErrorLogger          *log.Logger
 	Mutex                sync.RWMutex
 }
 
 type WebSocketClient struct {
-	Conn           *websocket.Conn
-	Ctx            context.Context
-	Cancel         context.CancelFunc
-	Router         MessageRouter
-	Authenticator  Authenticator
-	IsReconnecting atomic.Bool
-	ErrorLogger    *log.Logger
-	Mutex          sync.Mutex
+	Conn             *websocket.Conn
+	Ctx              context.Context
+	Cancel           context.CancelFunc
+	Router           MessageRouter
+	Authenticator    Authenticator
+	resubscriber     resubscriber
+	attemptReconnect bool
+	IsReconnecting   atomic.Bool
+	ErrorLogger      *log.Logger
+	managerWaitGroup *sync.WaitGroup
+	Mutex            sync.Mutex
 }
 
 type MessageRouter interface {
 	routeMessage(msg []byte) error
 }
 
+// Authenticator is a field in WebSocketClient to hold a pointer to KrakenClient
+// for access to authenticating token methods without creating circular depencies
 type Authenticator interface {
 	AuthenticateWebSockets() error
 	reauthenticate()
+}
+
+// resubscriber is a field in WebSocketClient to hold a pointer to WebSocketManger
+// for access to resubscribing to channels without creating circular depencies
+type resubscriber interface {
+	resubscribe(url string) error
 }
 
 // Internal order book management
@@ -194,7 +206,10 @@ type GenericCallback func(data interface{})
 // Creates new authenticated client KrakenClient for Kraken API with keys passed
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier', but
 // this value is only used if any self rate-limiting features are activated with
-// either StartRESTRateLimiter() or StartTradingRateLimiter().
+// either StartRESTRateLimiter() or StartTradingRateLimiter(). Accepts up to one
+// optional boolean arg passed to 'reconnect' which will cause client to attepmt
+// reconnect, reauthenticate (if applicable), and resubscribe to all WebSocket
+// channels if connection is lost. Defaults to true if not passed.
 //
 // Verification Tiers:
 //
@@ -207,7 +222,14 @@ type GenericCallback func(data interface{})
 // # Enum:
 //
 // 'verificationTier': [1..3]
-func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenClient, error) {
+func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, autoReconnect ...bool) (*KrakenClient, error) {
+	if len(autoReconnect) > 1 {
+		return nil, fmt.Errorf("%w; expected 3 or 4", ErrTooManyArgs)
+	}
+	recon := true
+	if len(autoReconnect) > 0 {
+		recon = autoReconnect[0]
+	}
 	decodedSecret, err := base64.StdEncoding.DecodeString(apiSecret)
 	if err != nil {
 		return nil, err
@@ -220,10 +242,11 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenC
 	maxCounter := maxCounterMap[verificationTier]
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	kc := &KrakenClient{
-		APIKey:      apiKey,
-		APISecret:   decodedSecret,
-		Client:      sharedClient,
-		ErrorLogger: logger,
+		APIKey:        apiKey,
+		APISecret:     decodedSecret,
+		Client:        sharedClient,
+		ErrorLogger:   logger,
+		autoReconnect: recon,
 	}
 	kc.APIManager = &APIManager{
 		HandleRateLimit: atomic.Bool{},
@@ -258,6 +281,7 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8) (*KrakenC
 		BalanceMgr: &BalanceManager{
 			isActive: false,
 		},
+		ConnectWaitGroup: &sync.WaitGroup{},
 	}
 	kc.OrderBookMgr.isTracking.Store(false)
 	kc.TradingRateLimiter.HandleRateLimit.Store(false)

@@ -34,7 +34,6 @@ import (
 )
 
 // TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
-// TODO test if go routine resource leak when unsubscribing, do goroutines shut?
 // TODO add trading rate limit to REST API calls
 
 // #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
@@ -2459,6 +2458,7 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	// and Subscribe() methods are called for the same channel
 	// if channel/pair already exists, unlock mutex and sleep lets Unsubscribe()
 	// processes finish deleting pair from book before creating a new one
+	// FIXME code will likely be reached and slow down resubscribing
 	if _, ok := ws.SubscriptionMgr.PublicSubscriptions[channelName][pair]; ok {
 		ws.SubscriptionMgr.Mutex.Unlock()
 		time.Sleep(time.Millisecond * 300)
@@ -2484,11 +2484,16 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 		<-sub.ConfirmedChan // wait for subscription confirmed
 		for {
 			select {
-			case data := <-sub.DataChan:
-				if sub.DataChanClosed == 0 { // channel is open
-					if sub.Callback != nil {
-						sub.Callback(data)
+			case <-ws.WebSocketClient.Ctx.Done():
+				if sub.DoneChanClosed == 0 { // channel is open
+					sub.closeChannels()
+					// Delete subscription from map if not attempting reconnect
+					if !ws.WebSocketClient.attemptReconnect {
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
+						ws.SubscriptionMgr.Mutex.Unlock()
 					}
+					return
 				}
 			case <-sub.DoneChan:
 				if sub.DoneChanClosed == 0 { // channel is open
@@ -2499,14 +2504,11 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 					ws.SubscriptionMgr.Mutex.Unlock()
 					return
 				}
-			case <-ws.WebSocketClient.Ctx.Done():
-				if sub.DoneChanClosed == 0 { // channel is open
-					sub.closeChannels()
-					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
-					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
-					ws.SubscriptionMgr.Mutex.Unlock()
-					return
+			case data := <-sub.DataChan:
+				if sub.DataChanClosed == 0 { // channel is open
+					if sub.Callback != nil {
+						sub.Callback(data)
+					}
 				}
 			}
 		}
@@ -2552,6 +2554,26 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 			<-sub.ConfirmedChan // wait for subscription confirmed
 			for {
 				select {
+				case <-ws.AuthWebSocketClient.Ctx.Done():
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map if not attempting reconnect
+						if !ws.WebSocketClient.attemptReconnect {
+							ws.SubscriptionMgr.Mutex.Lock()
+							delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+							ws.SubscriptionMgr.Mutex.Unlock()
+						}
+						return
+					}
+				case <-sub.DoneChan:
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map
+						ws.SubscriptionMgr.Mutex.Lock()
+						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+						ws.SubscriptionMgr.Mutex.Unlock()
+						return
+					}
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
 						// send to trade logger if it is running
@@ -2591,6 +2613,25 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 							sub.Callback(data)
 						}
 					}
+				}
+			}
+		}()
+	case "openOrders":
+		go func() {
+			<-sub.ConfirmedChan // wait for subscription confirmed
+			for {
+				select {
+				case <-ws.AuthWebSocketClient.Ctx.Done():
+					if sub.DoneChanClosed == 0 { // channel is open
+						sub.closeChannels()
+						// Delete subscription from map if not attempting reconnect
+						if !ws.WebSocketClient.attemptReconnect {
+							ws.SubscriptionMgr.Mutex.Lock()
+							delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
+							ws.SubscriptionMgr.Mutex.Unlock()
+						}
+						return
+					}
 				case <-sub.DoneChan:
 					if sub.DoneChanClosed == 0 { // channel is open
 						sub.closeChannels()
@@ -2600,23 +2641,6 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 						ws.SubscriptionMgr.Mutex.Unlock()
 						return
 					}
-				case <-ws.AuthWebSocketClient.Ctx.Done():
-					if sub.DoneChanClosed == 0 { // channel is open
-						sub.closeChannels()
-						// Delete subscription from map
-						ws.SubscriptionMgr.Mutex.Lock()
-						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-						ws.SubscriptionMgr.Mutex.Unlock()
-						return
-					}
-				}
-			}
-		}()
-	case "openOrders":
-		go func() {
-			<-sub.ConfirmedChan // wait for subscription confirmed
-			for {
-				select {
 				case data := <-sub.DataChan:
 					if sub.DataChanClosed == 0 { // channel is open
 						openOrders, ok := data.(WSOpenOrdersResp)
@@ -2647,24 +2671,6 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 							sub.Callback(data)
 						}
 					}
-				case <-sub.DoneChan:
-					if sub.DoneChanClosed == 0 { // channel is open
-						sub.closeChannels()
-						// Delete subscription from map
-						ws.SubscriptionMgr.Mutex.Lock()
-						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-						ws.SubscriptionMgr.Mutex.Unlock()
-						return
-					}
-				case <-ws.AuthWebSocketClient.Ctx.Done():
-					if sub.DoneChanClosed == 0 { // channel is open
-						sub.closeChannels()
-						// Delete subscription from map
-						ws.SubscriptionMgr.Mutex.Lock()
-						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-						ws.SubscriptionMgr.Mutex.Unlock()
-						return
-					}
 				}
 			}
 		}()
@@ -2688,24 +2694,30 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
-							if c.IsReconnecting.CompareAndSwap(false, true) {
-								c.reconnect(url)
+							if c.attemptReconnect {
+								if c.IsReconnecting.CompareAndSwap(false, true) {
+									c.reconnect(url)
+								}
 							}
 							return
 						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
 							c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
-							if c.IsReconnecting.CompareAndSwap(false, true) {
-								c.reconnect(url)
+							if c.attemptReconnect {
+								if c.IsReconnecting.CompareAndSwap(false, true) {
+									c.reconnect(url)
+								}
 							}
 							return
 						} else if strings.Contains(err.Error(), "wsarecv") {
 							c.ErrorLogger.Println("internet connection lost, attempting reconnect to url |", url)
 							c.Cancel()
 							c.Conn.Close()
-							if c.IsReconnecting.CompareAndSwap(false, true) {
-								c.reconnect(url)
+							if c.attemptReconnect {
+								if c.IsReconnecting.CompareAndSwap(false, true) {
+									c.reconnect(url)
+								}
 							}
 							return
 						}
@@ -3327,7 +3339,7 @@ func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
 // Helper method that initializes WebSocketClient for public endpoints by
 // dialing Kraken's server and starting its message reader.
 func (kc *KrakenClient) connectPublic() error {
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, resubscriber: kc.WebSocketManager, attemptReconnect: kc.autoReconnect, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger, managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup}
 	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
 	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
 	if err != nil {
@@ -3355,7 +3367,7 @@ func (kc *KrakenClient) connectPrivate() error {
 			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
 		}
 	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger}
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, resubscriber: kc.WebSocketManager, attemptReconnect: kc.autoReconnect, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger, managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup}
 	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
 	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
 	if err != nil {
@@ -3369,6 +3381,8 @@ func (kc *KrakenClient) connectPrivate() error {
 // Attempts reconnect with dialKraken() method. Retries 5 times instantly then
 // scales back to attempt reconnect once every ~8 seconds.
 func (c *WebSocketClient) reconnect(url string) error {
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
 		t := 1.0
 		count := 0
@@ -3377,8 +3391,10 @@ func (c *WebSocketClient) reconnect(url string) error {
 			if err != nil {
 				c.ErrorLogger.Printf("encountered error on reconnecting, trying again | %s\n", err)
 			} else {
+				c.managerWaitGroup.Add(1)
 				c.ErrorLogger.Println("reconnect successful")
 				c.IsReconnecting.Store(false)
+				wg.Done()
 				return
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
@@ -3392,6 +3408,7 @@ func (c *WebSocketClient) reconnect(url string) error {
 			time.Sleep(time.Duration(t) * time.Second)
 		}
 	}()
+	wg.Wait()
 	// Reauthenticate WebSocket token if Private
 	if url == wsPrivateURL {
 		err := c.Authenticator.AuthenticateWebSockets()
@@ -3407,6 +3424,65 @@ func (c *WebSocketClient) reconnect(url string) error {
 		}
 	}
 	c.startMessageReader(url)
+	err := c.resubscriber.resubscribe(url)
+	if err != nil {
+		return fmt.Errorf("error calling resubscribe | %w", err)
+	}
+	return nil
+}
+
+func (ws *WebSocketManager) resubscribe(url string) error {
+	switch url {
+	case wsPrivateURL:
+		for channelName, sub := range ws.SubscriptionMgr.PrivateSubscriptions {
+			switch channelName {
+			case "ownTrades":
+				ws.SubscribeOwnTrades(sub.Callback, WithoutSnapshot())
+			case "openOrders":
+				ws.SubscribeOpenOrders(sub.Callback, WithRateCounter())
+			}
+		}
+	case wsPublicURL:
+		for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
+			switch {
+			case channelName == "ticker":
+				for pair, sub := range pairMap {
+					ws.SubscribeTicker(pair, sub.Callback)
+				}
+			case channelName == "trade":
+				for pair, sub := range pairMap {
+					ws.SubscribeTrade(pair, sub.Callback)
+				}
+			case channelName == "spread":
+				for pair, sub := range pairMap {
+					ws.SubscribeSpread(pair, sub.Callback)
+				}
+			case strings.HasPrefix(channelName, "ohlc"):
+				_, intervalStr, _ := strings.Cut(channelName, "-")
+				interval, err := strconv.ParseUint(intervalStr, 10, 16)
+				if err != nil {
+					return fmt.Errorf("error parsing uint from interval string")
+				}
+				for pair, sub := range pairMap {
+					ws.SubscribeOHLC(pair, uint16(interval), sub.Callback)
+				}
+			case strings.HasPrefix(channelName, "book"):
+				_, depthStr, _ := strings.Cut(channelName, "-")
+				depth, err := strconv.ParseUint(depthStr, 10, 16)
+				if err != nil {
+					return fmt.Errorf("error parsing uint from interval string")
+				}
+				for pair, sub := range pairMap {
+					ws.SubscribeBook(pair, uint16(depth), sub.Callback)
+				}
+			default:
+				return fmt.Errorf("unknown channelName")
+			}
+
+		}
+	default:
+		return fmt.Errorf("unknown url")
+	}
 	return nil
 }
 
@@ -3528,6 +3604,12 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 					ob := ws.OrderBookMgr.OrderBooks[channelName][pair]
 					for {
 						select {
+						case <-ws.WebSocketClient.Ctx.Done():
+							ws.closeAndDeleteBook(ob, pair, channelName)
+							return
+						case <-ob.DoneChan:
+							ws.closeAndDeleteBook(ob, pair, channelName)
+							return
 						case bookUpdate := <-ob.DataChan:
 							if ob.DataChanClosed == 0 {
 								ob.Mutex.Lock()
@@ -3605,12 +3687,6 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 									return
 								}
 							}
-						case <-ob.DoneChan:
-							ws.closeAndDeleteBook(ob, pair, channelName)
-							return
-						case <-ws.WebSocketClient.Ctx.Done():
-							ws.closeAndDeleteBook(ob, pair, channelName)
-							return
 						}
 					}
 				}()
