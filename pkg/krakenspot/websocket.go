@@ -33,7 +33,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO instead of wiping all subscriptions on disconnect with ctx.Cancel, keep them active and attempt resubscribe
+// TODO "improper open orders sequence, shutting down go routine" do something else with out of order sequence, maybe just log? add a functional option?
 // TODO add trading rate limit to REST API calls
 
 // #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
@@ -1254,7 +1254,7 @@ func (ws *WebSocketManager) UnsubscribeOwnTrades(options ...UnsubscribeOwnTrades
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Functional Options:
 //
@@ -1290,6 +1290,11 @@ func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, option
 	err := ws.subscribePrivate(channelName, payload, callback)
 	if err != nil {
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
+	}
+	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+		ws.OpenOrdersMgr.Mutex.Lock()
+		ws.OpenOrdersMgr.seq = 0
+		ws.OpenOrdersMgr.Mutex.Unlock()
 	}
 	return nil
 }
@@ -3265,12 +3270,23 @@ func (ws *WebSocketManager) startOpenOrderManager() {
 
 	for data := range ws.OpenOrdersMgr.ch {
 		if data.Sequence != ws.OpenOrdersMgr.seq+1 {
-			ws.ErrorLogger.Println("improper open orders sequence, shutting down go routine")
-			return
+			ws.ErrorLogger.Println("improper open orders sequence; unsubscribing channel and resubscribing")
+			err := ws.UnsubscribeOpenOrders()
+			if err != nil {
+				ws.ErrorLogger.Println("error unsubscribing \"openOrders\"; shutting down open order manager |", err)
+				return
+			}
+			time.Sleep(time.Millisecond * 300)
+			err = ws.SubscribeOpenOrders(ws.SubscriptionMgr.PrivateSubscriptions["openOrders"].Callback, WithRateCounter())
+			if err != nil {
+				ws.ErrorLogger.Println("error resubscribing \"openOrders\"; shutting down open order manager |", err)
+				return
+			}
 		} else {
 			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
 			if ws.OpenOrdersMgr.seq == 1 {
 				// Build initial state of open orders
+				ws.OpenOrdersMgr.OpenOrders = make(map[string]WSOpenOrder, len(data.OpenOrders))
 				for _, order := range data.OpenOrders {
 					for orderID, orderInfo := range order {
 						ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
