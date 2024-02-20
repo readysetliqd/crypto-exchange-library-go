@@ -199,7 +199,7 @@ type GenericCallback func(data interface{})
 // to args 'apiKey' and 'apiSecret'. Constructor requires 'verificationTier', but
 // this value is only used if any self rate-limiting features are activated with
 // either StartRESTRateLimiter() or StartTradingRateLimiter(). Accepts up to one
-// optional boolean arg passed to 'reconnect' which will cause client to attepmt
+// optional boolean arg passed to 'reconnect' which will cause client to attempt
 // reconnect, reauthenticate (if applicable), and resubscribe to all WebSocket
 // channels if connection is lost. Defaults to true if not passed.
 //
