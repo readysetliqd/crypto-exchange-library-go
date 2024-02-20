@@ -118,9 +118,9 @@ func (sms *SMSystem) NewStateManager(instanceID int32) (*StateManager, error) {
 		states:       make(map[string]State),
 		eventChan:    make(chan Event, 3),
 		responseChan: make(chan interface{}),
+		errorLogger:  sms.errorLogger,
 		ctx:          ctx,
 		cancel:       cancel,
-		errorLogger:  sms.errorLogger,
 	}
 	sms.stateManagers[instanceID] = stateManager
 	return stateManager, nil
@@ -233,9 +233,29 @@ func (sm *StateManager) SendEvent(event Event) {
 }
 
 // ReceiveResponse receives a response from the StateManager's response channel
-// and returns it.
-func (sm *StateManager) ReceiveResponse() interface{} {
-	return <-sm.responseChan
+// and returns it and a bool to signal a response was received.
+//
+// # Example Usage:
+//
+//	// Start a go routine that attempts reads from the response channel every second
+//	go func() {
+//		for {
+//			// implement your own logic to break from this loop
+//			resp, ok := sm.ReceiveResponse()
+//			if ok {
+//				log.Println(resp)
+//			} else {
+//				time.Sleep(time.Second)
+//			}
+//		}
+//	}
+func (sm *StateManager) ReceiveResponse() (interface{}, bool) {
+	select {
+	case resp := <-sm.responseChan:
+		return resp, true
+	default:
+		return nil, false
+	}
 }
 
 // #endregion
