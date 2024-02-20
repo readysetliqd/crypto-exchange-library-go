@@ -33,7 +33,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO "improper open orders sequence, shutting down go routine" do something else with out of order sequence, maybe just log? add a functional option?
 // TODO add trading rate limit to REST API calls
 
 // #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
@@ -698,7 +697,7 @@ func (ws *WebSocketManager) WaitForConnect(timeoutMilliseconds ...uint16) error 
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Functional Options:
 //
@@ -772,7 +771,7 @@ func (ws *WebSocketManager) UnsubscribeTicker(pair string, options ...ReqIDOptio
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Enum:
 //
@@ -853,7 +852,7 @@ func (ws *WebSocketManager) UnsubscribeOHLC(pair string, interval uint16, option
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Functional Options:
 //
@@ -926,7 +925,7 @@ func (ws *WebSocketManager) UnsubscribeTrade(pair string, options ...ReqIDOption
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Functional Options:
 //
@@ -1003,7 +1002,7 @@ func (ws *WebSocketManager) UnsubscribeSpread(pair string, options ...ReqIDOptio
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // When nil is passed, access state of the orderbook with the following methods:
 //
@@ -1163,7 +1162,7 @@ func (ws *WebSocketManager) UnsubscribeBook(pair string, depth uint16, options .
 //
 // CAUTION: Passing both a non-nil callback function and reading the channels
 // manually in your code will result in conflicts reading incoming data. Choose
-// one method or the other.
+// one solution or the other.
 //
 // # Functional Options:
 //
@@ -2463,7 +2462,7 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	// and Subscribe() methods are called for the same channel
 	// if channel/pair already exists, unlock mutex and sleep lets Unsubscribe()
 	// processes finish deleting pair from book before creating a new one
-	// FIXME code will likely be reached and slow down resubscribing
+	// FIXME code will likely be reached and slow down when resubscribing
 	if _, ok := ws.SubscriptionMgr.PublicSubscriptions[channelName][pair]; ok {
 		ws.SubscriptionMgr.Mutex.Unlock()
 		time.Sleep(time.Millisecond * 300)

@@ -2,7 +2,7 @@
 // concurrent-safe manner intended for use with the crypto exchange APIs throughout
 // this repo.
 //
-// This file, statemanager.go, contains the implementation of this package. It
+// The file statemanager.go contains the implementation of this package. It
 // includes the definition of states, events, and their handlers, as well as
 // the management of state transitions.
 package statemanager
@@ -10,6 +10,9 @@ package statemanager
 import (
 	"context"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -19,6 +22,7 @@ import (
 // SMSystem is a system that manages multiple StateManagers.
 type SMSystem struct {
 	stateManagers map[int32]*StateManager
+	errorLogger   *log.Logger
 	mutex         sync.RWMutex
 }
 
@@ -29,6 +33,7 @@ type StateManager struct {
 	prevState    State
 	eventChan    chan Event
 	responseChan chan interface{}
+	errorLogger  *log.Logger
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mutex        sync.RWMutex
@@ -53,36 +58,107 @@ type Event interface {
 
 // StartStateManagement initializes a new SMSystem and returns its pointer.
 func StartStateManagement() *SMSystem {
+	logger := log.New(os.Stderr, "", log.LstdFlags)
 	sms := &SMSystem{
 		stateManagers: make(map[int32]*StateManager),
+		errorLogger:   logger,
 	}
 	return sms
 }
 
+// SetErrorLogger creates a new custom error logger for SMSystem and its
+// StateManagers. The logger logs to the provided 'output' io.Writer. This
+// method also sets the created logger as the errorLogger for the SMSystem and
+// all its existing StateManagers. It returns the newly created logger.
+//
+// Note: This method will overwrite the errorLogger for any StateManagers that
+// are already created.
+//
+// # Example Usage:
+//
+//	// Open a file for logging
+//	file, err := os.OpenFile("log.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer file.Close()
+//
+//	// Create a new SMS
+//	sms := StartStateManagement()
+//	logger := sms.SetErrorLogger(file)
+//
+//	// Create new Kraken Client and set same file for its logger
+//	kc := NewKrakenClient(apiKey, secretKey, 2)
+//	kc.SetErrorLogger(file)
+func (sms *SMSystem) SetErrorLogger(output io.Writer) *log.Logger {
+	logger := log.New(output, "", log.LstdFlags)
+	sms.errorLogger = logger
+	if sms.stateManagers != nil {
+		for _, sm := range sms.stateManagers {
+			sm.errorLogger = logger
+		}
+	}
+	return logger
+}
+
 // NewStateManager creates a new StateManager for a given instance and adds it
-// to the SMSystem.
-func (sms *SMSystem) NewStateManager(instanceID int32) *StateManager {
+// to the SMSystem. Arg passed to 'instanceID' must be unique, returns an error
+// if duplicate IDs are passed without first deleting it with DeleteStateManager.
+func (sms *SMSystem) NewStateManager(instanceID int32) (*StateManager, error) {
+	sms.mutex.Lock()
+	defer sms.mutex.Unlock()
+
+	if _, ok := sms.stateManagers[instanceID]; ok {
+		return nil, fmt.Errorf("error creating state manager; state manager with instanceID %v already exists", instanceID)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	stateManager := &StateManager{
 		currentState: nil,
 		prevState:    nil,
 		states:       make(map[string]State),
-		eventChan:    make(chan Event),
+		eventChan:    make(chan Event, 3),
 		responseChan: make(chan interface{}),
 		ctx:          ctx,
 		cancel:       cancel,
+		errorLogger:  sms.errorLogger,
 	}
-	sms.mutex.Lock()
 	sms.stateManagers[instanceID] = stateManager
-	sms.mutex.Unlock()
-	return stateManager
+	return stateManager, nil
 }
 
-// AddState adds a new state to the StateManager.
+// DeleteStateManager removes the StateManager associated with the given
+// instanceID from the SMSystem. It returns an error if a StateManager with
+// the given instanceID does not exist in the SMSystem.
+func (sms *SMSystem) DeleteStateManager(instanceID int32) error {
+	sms.mutex.Lock()
+	defer sms.mutex.Unlock()
+
+	if _, ok := sms.stateManagers[instanceID]; !ok {
+		return fmt.Errorf("state manager with 'instanceID' %v does not exist", instanceID)
+	}
+	delete(sms.stateManagers, instanceID)
+	return nil
+}
+
+// AddState adds a new state to the StateManager. Overwrites state if duplicate
+// 'stateName' are entered.
 func (sm *StateManager) AddState(stateName string, state State) {
 	sm.mutex.Lock()
 	sm.states[stateName] = state
 	sm.mutex.Unlock()
+}
+
+// DeleteState deletes a state with 'stateName' from the StateManager. Returns
+// an error if 'stateName' does not exist in StateManager.states map.
+func (sm *StateManager) DeleteState(stateName string) error {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	if _, ok := sm.states[stateName]; !ok {
+		return fmt.Errorf("error deleting state with stateName %s; does not exist", stateName)
+	}
+	delete(sm.states, stateName)
+	return nil
 }
 
 // #endregion
@@ -94,6 +170,7 @@ func (sm *StateManager) AddState(stateName string, state State) {
 func (sm *StateManager) GetState(stateName string) (State, error) {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
+
 	state, ok := sm.states[stateName]
 	if !ok {
 		return nil, fmt.Errorf("state with name \"%s\" does not exist in map, check spelling and use AddState() if necessary", stateName)
@@ -137,12 +214,12 @@ func (sm *StateManager) Run() {
 	for {
 		select {
 		case <-sm.ctx.Done():
-			fmt.Println("state manager stopped |", sm.ctx.Err())
+			sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
 			return
 		case event := <-sm.eventChan:
 			err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
 			if err != nil {
-				fmt.Println("error handling event: ", err)
+				sm.errorLogger.Println("error handling event: ", err)
 			}
 		default:
 			sm.currentState.Update(sm.ctx)

@@ -289,8 +289,10 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, autoRecon
 	return kc, nil
 }
 
-// Creates new custom error logger for KrakenClient and its components to log
-// to file provided to 'output'. This method returns the newly created logger.
+// SetErrorLogger creates a new custom error logger for KrakenClient and its
+// components. The logger logs to the provided 'output' io.Writer. This method
+// also sets the created logger as the ErrorLogger for the KrakenClient and its
+// WebSocketManager and WebSocketClients. It returns the newly created logger.
 //
 // # Example Usage:
 //

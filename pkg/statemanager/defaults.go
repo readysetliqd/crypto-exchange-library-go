@@ -34,7 +34,10 @@ func (s *DefaultState) Update(ctx context.Context) {
 
 // HandleEvent is called to handle an event. This is a placeholder implementation.
 func (s *DefaultState) HandleEvent(ctx context.Context, event Event, responChan chan interface{}) error {
-	// Do nothing. Placeholder implementation
+	err := event.Process(ctx)
+	if err != nil {
+		return err
+	}
 	// fmt.Println("Handling event...")
 	return nil
 }
