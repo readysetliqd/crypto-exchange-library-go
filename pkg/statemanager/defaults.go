@@ -12,6 +12,8 @@ import (
 
 // DefaultState is a placeholder implementation of the State interface. It can
 // be embedded in user-defined states to ensure they satisfy the State interface.
+// All methods on DefaultState are NoOp except HandleEvent which calls the event's
+// Process method and returns nil normally or returns err if Process threw an error.
 type DefaultState struct{}
 
 // Enter is called when the state is entered. This is a placeholder implementation.

@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,6 +29,7 @@ type SMSystem struct {
 
 // StateManager manages the states and transitions of a single instance.
 type StateManager struct {
+	isRunning    atomic.Bool
 	states       map[string]State
 	currentState State
 	prevState    State
@@ -101,20 +103,51 @@ func (sms *SMSystem) SetErrorLogger(output io.Writer) *log.Logger {
 	return logger
 }
 
+// InitialState embeds DefaultState with the only different that HandleEvent is
+// also NoOp (no longer calls Process on the event). NewStateManager currentState
+// and prevState fields are initialized as InitialState type.
+type InitialState struct {
+	DefaultState
+}
+
+func (s *InitialState) HandleEvent(ctx context.Context, event Event, responseChan chan interface{}) error {
+	return nil
+}
+
 // NewStateManager creates a new StateManager for a given instance and adds it
-// to the SMSystem. Arg passed to 'instanceID' must be unique, returns an error
-// if duplicate IDs are passed without first deleting it with DeleteStateManager.
-func (sms *SMSystem) NewStateManager(instanceID int32) (*StateManager, error) {
+// to the SMSystem. Arg passed to 'instanceID' must be unique. Accepts none or
+// any functional options args passed to 'options'.
+//
+// Note: Returns existing state manager if duplicate IDs are passed and prints
+// an error message to sms.errorLogger. Does not throw an error and does not
+// overwrite with a new StateManager instance without first deleting the
+// existing one with DeleteStateManager.
+//
+// # Functional Options:
+//
+//	// WithInitialState sets the currentState field of a StateManager to the given state. Defaults to InitialState type if not passed. Prints error message if nil state is passed and returns effectively leaving currentState as default.
+//	func WithInitialState(initialState State) NewStateManagerOption
+//
+//	// WithoutRun prevents the StateManager from calling the Run method on startup. Defaults to calling Run on startup.
+//	func WithoutRun() NewStateManagerOption
+//
+//	// WithAddState adds the state to the states map on initialization. Identical functionality as StateManager.AddState
+//	func WithAddState(stateName string, state State) NewStateManagerOption {
+func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManagerOption) *StateManager {
 	sms.mutex.Lock()
 	defer sms.mutex.Unlock()
 
 	if _, ok := sms.stateManagers[instanceID]; ok {
-		return nil, fmt.Errorf("error creating state manager; state manager with instanceID %v already exists", instanceID)
+		sms.errorLogger.Println(ErrInstanceIDExists.Error())
+		return sms.stateManagers[instanceID]
 	}
+
+	// Instance with default values
 	ctx, cancel := context.WithCancel(context.Background())
 	stateManager := &StateManager{
-		currentState: nil,
-		prevState:    nil,
+		isRunning:    atomic.Bool{},
+		currentState: &InitialState{},
+		prevState:    &InitialState{},
 		states:       make(map[string]State),
 		eventChan:    make(chan Event, 3),
 		responseChan: make(chan interface{}),
@@ -122,8 +155,18 @@ func (sms *SMSystem) NewStateManager(instanceID int32) (*StateManager, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
+	stateManager.isRunning.Store(true)
 	sms.stateManagers[instanceID] = stateManager
-	return stateManager, nil
+
+	// Apply functional options
+	for _, opt := range options {
+		opt(stateManager)
+	}
+
+	if stateManager.isRunning.Load() { // can be set by WithoutRun functional option
+		go stateManager.Run()
+	}
+	return stateManager
 }
 
 // DeleteStateManager removes the StateManager associated with the given
@@ -136,6 +179,8 @@ func (sms *SMSystem) DeleteStateManager(instanceID int32) error {
 	if _, ok := sms.stateManagers[instanceID]; !ok {
 		return fmt.Errorf("state manager with 'instanceID' %v does not exist", instanceID)
 	}
+	sms.stateManagers[instanceID].Pause()
+	time.Sleep(time.Millisecond * 50)
 	delete(sms.stateManagers, instanceID)
 	return nil
 }
@@ -196,24 +241,42 @@ func (sm *StateManager) PreviousState() State {
 
 // #region State operation methods
 
-// SetState sets the current state of the StateManager to the given state.
+// SetState sets the current state of the StateManager to the given state and
+// calls the appropriate state.Exit and state.Enter methods when state manager
+// is running.
 func (sm *StateManager) SetState(state State) {
 	sm.mutex.Lock()
-	if sm.currentState != nil {
-		sm.prevState = sm.currentState
+	sm.prevState = sm.currentState
+	sm.mutex.Unlock()
+	if sm.isRunning.Load() {
 		sm.currentState.Exit(state)
 	}
+	sm.mutex.Lock()
 	sm.currentState = state
 	sm.mutex.Unlock()
-	sm.currentState.Enter(sm.prevState)
+	if sm.isRunning.Load() {
+		sm.currentState.Enter(sm.prevState)
+	}
+}
+
+// ForceState sets currentState to the arg passed to 'state' whilst skipping
+// calling the appropriate Enter and Exit methods regardless if statemanager is
+// running or not. Normal usage is to use SetState instead.
+func (sm *StateManager) ForceState(state State) {
+	sm.mutex.Lock()
+	sm.prevState = sm.currentState
+	sm.currentState = state
+	sm.mutex.Unlock()
 }
 
 // Run starts the main loop of the StateManager, which handles events and
 // updates the current state.
 func (sm *StateManager) Run() {
+	sm.isRunning.Store(true)
 	for {
 		select {
 		case <-sm.ctx.Done():
+			sm.isRunning.Store(false)
 			sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
 			return
 		case event := <-sm.eventChan:
@@ -225,6 +288,35 @@ func (sm *StateManager) Run() {
 			sm.currentState.Update(sm.ctx)
 		}
 	}
+}
+
+// IsRunning returns true if statemanager is running.
+func (sm *StateManager) IsRunning() bool {
+	return sm.isRunning.Load()
+}
+
+// Pause cancels the context of the StateManager, effectively stopping it. This
+// skips any state.Exit logic and also prevents future Enter or Exit methods being
+// called when setting state with SetState. It also returns from the Run goroutine
+// effectively stopping listening for events, stopping HandleEvent method being
+// called, and stopping Update methods being called continuously. It maintains
+// currentState and prevState, use Reset instead if needed to force both back to
+// InitialState. Resume statemanager operation with Run
+func (sm *StateManager) Pause() {
+	sm.cancel()
+}
+
+// Reset cancels the context of the StateManager, effectively stopping it, and
+// assigns currentState and prevState fields back to InitialState while skipping
+// state.Exit logic for the currently running state. If currentState and prevState
+// need to be maintained, use Pause instead. Start statemanager again with Run.
+func (sm *StateManager) Reset() {
+	sm.cancel()
+	time.Sleep(time.Millisecond * 50) // wait for goroutine to return
+	sm.mutex.Lock()
+	sm.currentState = &InitialState{}
+	sm.prevState = &InitialState{}
+	sm.mutex.Unlock()
 }
 
 // SendEvent sends an event to the StateManager's event channel.
@@ -261,11 +353,6 @@ func (sm *StateManager) ReceiveResponse() (interface{}, bool) {
 // #endregion
 
 // #region Context methods
-
-// Cancel cancels the context of the StateManager, effectively stopping it.
-func (sm *StateManager) Cancel() {
-	sm.cancel()
-}
 
 // WithValue adds a value to the StateManager's context.
 func (sm *StateManager) WithValue(key, val interface{}) {

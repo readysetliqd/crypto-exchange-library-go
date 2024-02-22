@@ -49,54 +49,177 @@ func TestStartStateManagement(t *testing.T) {
 	}
 }
 
-func TestNewStateManager(t *testing.T) {
-	sms := StartStateManagement()
-
-	// check state manager was initialized
-	sm, err := sms.NewStateManager(1)
-	if err != nil {
-		t.Fatalf("NewStateManager() error: %v; want: nil", err)
-	}
-	if sm == nil {
-		t.Fatalf("NewStateManager(): %v; want: non-nil", sms)
-	}
-
-	// check sm was added to the map at the correct key
-	if sms.stateManagers[1] != sm {
-		t.Errorf("NewStateManager() did not add state manager to the stateManagers map at the correct key")
-	}
-
-	// check fields initialized correctly
-	if sm.currentState != nil {
-		t.Errorf("NewStateManager() currentState: %v; want: nil", sm.currentState)
-	}
-	if sm.prevState != nil {
-		t.Errorf("NewStateManager() prevState: %v; want: nil", sm.prevState)
-	}
-	if len(sm.states) != 0 {
-		t.Errorf("NewStateManager() len(sm.states): %v; want: map of length 0", sm.states)
-	}
-	if sm.eventChan == nil {
-		t.Errorf("NewStateManager() eventChan: %v; want: non-nil", sm.eventChan)
-	}
-	if sm.responseChan == nil {
-		t.Errorf("NewStateManager() responseChan: %v; want: non-nil", sm.responseChan)
-	}
-	if sm.ctx == nil {
-		t.Errorf("NewStateManager() ctx: %v; want: non-nil", sm.ctx)
-	}
-	if sm.cancel == nil {
-		t.Errorf("NewStateManager() cancel: %v; want: non-nil", sm.cancel)
-	}
-
-	// check that NewStateManager returns an error when duplicate ID is used
-	_, err = sms.NewStateManager(1)
-	if err == nil {
-		t.Errorf("NewStateManager() with duplicate id err: %v; want: non-nil", err)
-	}
+type MockState_NewStateManager struct {
+	MockDefaultState
+	entered      bool
+	updateCalled bool
 }
 
-func TestDeleteStateManager(t *testing.T) {
+func (s *MockState_NewStateManager) Enter(prevState State) {
+	s.entered = true
+}
+
+func (s *MockState_NewStateManager) Update(ctx context.Context) {
+	s.updateCalled = true
+}
+
+func TestSMSystem_NewStateManager(t *testing.T) {
+	sms := StartStateManagement()
+
+	t.Run("normal valid use without options", func(t *testing.T) {
+		// check state manager was initialized
+		sm := sms.NewStateManager(1)
+		if sm == nil {
+			t.Fatalf("NewStateManager(): %v; want: non-nil", sms)
+		}
+
+		// check sm was added to the map at the correct key
+		if sms.stateManagers[1] != sm {
+			t.Errorf("NewStateManager() did not add state manager to the stateManagers map at the correct key")
+		}
+
+		// check fields initialized correctly
+		currentState := sm.currentState
+		switch ty := currentState.(type) {
+		case *InitialState:
+		default:
+			t.Errorf("NewStateManager() currentState: %v; want: *InitialState", ty)
+		}
+		prevState := sm.prevState
+		switch ty := prevState.(type) {
+		case *InitialState:
+		default:
+			t.Errorf("NewStateManager() prevState: %v; want: *InitialState", ty)
+		}
+		if len(sm.states) != 0 {
+			t.Errorf("NewStateManager() len(sm.states): %v; want: map of length 0", sm.states)
+		}
+		if sm.eventChan == nil {
+			t.Errorf("NewStateManager() eventChan: %v; want: non-nil", sm.eventChan)
+		}
+		if sm.responseChan == nil {
+			t.Errorf("NewStateManager() responseChan: %v; want: non-nil", sm.responseChan)
+		}
+		if sm.ctx == nil {
+			t.Errorf("NewStateManager() ctx: %v; want: non-nil", sm.ctx)
+		}
+		if sm.cancel == nil {
+			t.Errorf("NewStateManager() cancel: %v; want: non-nil", sm.cancel)
+		}
+		// Tear down
+		sm.Pause()
+		time.Sleep(time.Millisecond * 50)
+	})
+
+	t.Run("duplicate instanceIDs", func(t *testing.T) {
+		// check that NewStateManager returns an error when duplicate ID is used
+		buf := new(bytes.Buffer)
+		sms.SetErrorLogger(buf)
+		sm1 := sms.NewStateManager(1)
+		sm2 := sms.NewStateManager(1)
+
+		// Check same state manager pointer was returned
+		if sm1 != sm2 {
+			t.Errorf("NewStateManager() did not return same state manager when duplicate ids passed")
+		}
+
+		// Check error message was written to errorLogger
+		expected := true
+		actual := strings.Contains(buf.String(), ErrInstanceIDExists.Error())
+		if expected != actual {
+			t.Errorf("NewStateManager() did not write error to buffer | got: %v; want: %v", actual, expected)
+		}
+
+		// Tear down
+		sm1.Pause()
+		time.Sleep(time.Millisecond * 50)
+		sms.DeleteStateManager(1)
+	})
+
+	t.Run("WithInitialState", func(t *testing.T) {
+		state1 := &MockState_NewStateManager{}
+		sm := sms.NewStateManager(1, WithInitialState(state1))
+		expected := state1
+		actual := sm.CurrentState()
+		if expected != actual {
+			t.Errorf("NewStateManager() did not set currentState correctly | got: %v; want: %v", actual, expected)
+		}
+		if state1.entered {
+			t.Errorf("NewStateManager() called enter on state passed to initialState")
+		}
+		time.Sleep(time.Millisecond * 100)
+		if !state1.updateCalled {
+			t.Errorf("NewStateManager() not calling Update on initial state passed when running")
+		}
+		// Tear down
+		sm.Pause()
+		time.Sleep(time.Millisecond * 50)
+		sms.DeleteStateManager(1)
+	})
+
+	t.Run("WithoutRun", func(t *testing.T) {
+		sm := sms.NewStateManager(1, WithoutRun())
+		state1 := &MockState_NewStateManager{}
+		sm.SetState(state1)
+		time.Sleep(time.Millisecond * 20)
+		if state1.entered {
+			t.Errorf("NewStateManager() called enter when not running")
+		}
+		if state1.updateCalled {
+			t.Errorf("NewStateManager() calling update when not running")
+		}
+		go sm.Run()
+		time.Sleep(time.Millisecond * 20)
+		if state1.entered {
+			t.Errorf("NewStateManager() called enter when state was set before running")
+		}
+		if !state1.updateCalled {
+			t.Errorf("NewStateManager() did not call update when running")
+		}
+		// Tear down
+		sm.Pause()
+		time.Sleep(time.Millisecond * 50)
+		sms.DeleteStateManager(1)
+	})
+
+	t.Run("WithAddState multiple entries", func(t *testing.T) {
+		state1 := &MockDefaultState{}
+		state2 := &MockDefaultState{}
+		state3 := &MockDefaultState{}
+		sm := sms.NewStateManager(1, WithAddState("state1", state1), WithAddState("state2", state2), WithAddState("state3", state3))
+
+		// Check states exist in the StateManager states map and return with GetState
+		expected := state1
+		actual, err := sm.GetState("state1")
+		if err != nil {
+			t.Errorf("NewStateManager() error getting state | got: %v; want: nil", err)
+		}
+		if expected != actual {
+			t.Errorf("NewStateManager() returned incorrect state | got: %v; want: %v", actual, expected)
+		}
+		expected = state2
+		actual, err = sm.GetState("state2")
+		if err != nil {
+			t.Errorf("NewStateManager() error getting state | got: %v; want: nil", err)
+		}
+		if expected != actual {
+			t.Errorf("NewStateManager() returned incorrect state | got: %v; want: %v", actual, expected)
+		}
+		expected = state3
+		actual, err = sm.GetState("state3")
+		if err != nil {
+			t.Errorf("NewStateManager() error getting state | got: %v; want: nil", err)
+		}
+		if expected != actual {
+			t.Errorf("NewStateManager() returned incorrect state | got: %v; want: %v", actual, expected)
+		}
+		// Tear down
+		sm.Pause()
+		time.Sleep(time.Millisecond * 50)
+	})
+}
+
+func TestSMSystem_DeleteStateManager(t *testing.T) {
 	sms := StartStateManagement()
 
 	// Add a StateManager to the system.
@@ -120,10 +243,10 @@ func TestDeleteStateManager(t *testing.T) {
 	}
 }
 
-func TestAddState(t *testing.T) {
+func TestStateManager_AddState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
 	state := &MockState{}
+	sm := sms.NewStateManager(1, WithoutRun())
 	sm.AddState("mock state", state)
 	if sm.states["mock state"] != state {
 		t.Errorf("AddState() state was not correctly added to the map sm.states[\"mock state\"]: %v; want: %v", sm.states["mock state"], state)
@@ -137,9 +260,9 @@ func TestAddState(t *testing.T) {
 	}
 }
 
-func TestDeleteState(t *testing.T) {
+func TestStateManager_DeleteState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	state := &MockState{}
 	sm.AddState("mock state", state)
 
@@ -161,9 +284,9 @@ func TestDeleteState(t *testing.T) {
 	}
 }
 
-func TestGetState(t *testing.T) {
+func TestStateManager_GetState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	state := &MockState{}
 	sm.AddState("mock state", state)
 
@@ -189,13 +312,16 @@ func TestGetState(t *testing.T) {
 	}
 }
 
-func TestCurrentState(t *testing.T) {
+func TestStateManager_CurrentState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 
-	// Check current state is nil before setting state
-	if currentState := sm.CurrentState(); currentState != nil {
-		t.Errorf("CurrentState() before setting state: %v; want: nil", currentState)
+	// Check current state type is InitialState before setting state
+	currentState := sm.CurrentState()
+	switch ty := currentState.(type) {
+	case *InitialState:
+	default:
+		t.Errorf("CurrentState() type before setting state: %v; want: *InitialState", ty)
 	}
 
 	// check current state is correct state after setting state once
@@ -216,21 +342,27 @@ func TestCurrentState(t *testing.T) {
 	}
 }
 
-func TestPreviousState(t *testing.T) {
+func TestStateManager_PreviousState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 
-	// Check previous state is nil before setting state
-	if prevState := sm.PreviousState(); prevState != nil {
-		t.Errorf("PreviousState() before setting state: %v; want: nil", prevState)
+	// Check previous state type is InitialState before setting state
+	prevState := sm.PreviousState()
+	switch ty := prevState.(type) {
+	case *InitialState:
+	default:
+		t.Errorf("PreviousState() type before setting state: %v; want: *InitialState", ty)
 	}
 
-	// Check previous state is nil after setting state once
+	// Check previous state type is InitialState after setting state once
 	state := &MockState{}
 	sm.AddState("mock state", state)
 	sm.SetState(state)
-	if prevState := sm.PreviousState(); prevState != nil {
-		t.Errorf("PreviousState() after setting state: %v; want: nil", prevState)
+	prevState = sm.PreviousState()
+	switch ty := prevState.(type) {
+	case *InitialState:
+	default:
+		t.Errorf("PreviousState() type after setting state once: %v; want: *InitialState", ty)
 	}
 
 	// Check previous state is correct after setting state twice
@@ -256,9 +388,9 @@ func (s *MockState_SetState) Exit(nextState State) {
 	s.exited = true
 }
 
-func TestSetState(t *testing.T) {
+func TestStateManager_SetState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	state1 := &MockState_SetState{
 		entered: false,
 		exited:  false,
@@ -270,31 +402,103 @@ func TestSetState(t *testing.T) {
 	}
 	sm.AddState("mock state2", state2)
 
-	// Check state1 Enter was called and Exit was not called
-	sm.SetState(state1)
-	if !state1.entered {
-		t.Errorf("SetState() did not call Enter on setting the new state")
-	}
-	if state1.exited {
-		t.Errorf("SetState() called exit on setting the new state")
+	t.Run("SetState before Run", func(t *testing.T) {
+		// Check state1 Enter was called and Exit was not called
+		sm.SetState(state1)
+		if state1.entered {
+			t.Errorf("SetState() called Enter on setting the new state when state not running")
+		}
+		if state1.exited {
+			t.Errorf("SetState() called Exit on setting the new state when state not running")
+		}
+
+		// Check state1 Exit was called and state2 Enter was called
+		sm.SetState(state2)
+		if state1.exited {
+			t.Errorf("SetState() called Exit on the previous state when state not running")
+		}
+		if state2.entered {
+			t.Errorf("SetState() called Enter on the new state when state not running")
+		}
+
+		// Check that currentState and prevState were updated correctly
+		switch ty := sm.CurrentState().(type) {
+		case *InitialState:
+			t.Errorf("SetState() updated current state when not running got: %v; want: *InitialState", ty)
+		default:
+		}
+		switch ty := sm.PreviousState().(type) {
+		case *InitialState:
+			t.Errorf("SetState() updated previous state when not running got: %v; want: *InitialState", ty)
+		default:
+		}
+	})
+
+	t.Run("SetState after Run", func(t *testing.T) {
+		go sm.Run()
+		time.Sleep(time.Millisecond * 50)
+		// Check state1 Enter was called and Exit was not called
+		sm.SetState(state1)
+		if !state1.entered {
+			t.Errorf("SetState() did not call Enter on setting the new state")
+		}
+		if state1.exited {
+			t.Errorf("SetState() called Exit on setting the new state")
+		}
+
+		// Check state1 Exit was called and state2 Enter was called
+		sm.SetState(state2)
+		if !state1.exited {
+			t.Errorf("SetState() did not call Exit on the previous state")
+		}
+		if !state2.entered {
+			t.Errorf("SetState() did not call Enter on the new state")
+		}
+
+		// Check that currentState and prevState were updated correctly
+		if sm.CurrentState() != state2 {
+			t.Errorf("SetState() did not update current state correctly CurrentState: %v; want: %v", sm.CurrentState(), state2)
+		}
+		if sm.PreviousState() != state1 {
+			t.Errorf("SetState() did not update previous state correctly PreviousState: %v; want: %v", sm.PreviousState(), state1)
+		}
+
+		// Tear down
+		sm.Pause()
+		time.Sleep(time.Millisecond * 50)
+	})
+}
+
+type MockState_ForceState struct {
+	MockDefaultState
+	entered bool
+	exited  bool
+}
+
+func (s *MockState_ForceState) Enter(prevState State) {
+	s.entered = true
+}
+
+func (s *MockState_ForceState) Exit(nextState State) {
+	s.exited = true
+}
+
+func TestStateManager_ForceState(t *testing.T) {
+	sm := StartStateManagement().NewStateManager(1)
+
+	state1 := &MockState_ForceState{}
+	state2 := &MockState_ForceState{}
+	sm.ForceState(state1)
+	sm.ForceState(state2)
+
+	// Check states not entered or exited despite state manager running
+	if state1.entered || state1.exited || state2.entered {
+		t.Errorf("ForceState() entered or exited state when state manager was running")
 	}
 
-	// Check state1 Exit was called and state2 Enter was called
-	sm.SetState(state2)
-	if !state1.exited {
-		t.Errorf("SetState() did not call Exit on the previous state")
-	}
-	if !state2.entered {
-		t.Errorf("SetState() did not call Enter on the new state")
-	}
-
-	// Check that currentState and prevState were updated correctly
-	if sm.CurrentState() != state2 {
-		t.Errorf("SetState() did not update current state correctly CurrentState: %v; want: %v", sm.CurrentState(), state2)
-	}
-	if sm.PreviousState() != state1 {
-		t.Errorf("SetState() did not update previous state correctly PreviousState: %v; want: %v", sm.PreviousState(), state1)
-	}
+	// Tear down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 50)
 }
 
 type MockState_Run struct {
@@ -315,12 +519,23 @@ func (e *MockEvent_Run) Process(ctx context.Context) error {
 	return nil
 }
 
-func TestRun(t *testing.T) {
+func TestStateManager_Run(t *testing.T) {
 	// Setup
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	state := &MockState_Run{}
 	sm.AddState("mock state", state)
+
+	// Send event before setting state and run is called
+	event1 := &MockEvent_Run{}
+	sm.SendEvent(event1)
+	time.Sleep(200 * time.Millisecond) // let event be processed
+
+	// Check that Process wasn't called
+	if event1.processCalled {
+		t.Errorf("Run() called Process on the event when state was nil")
+	}
+
 	sm.SetState(state)
 	go sm.Run()
 	time.Sleep(200 * time.Millisecond) // let state manager start running
@@ -330,8 +545,7 @@ func TestRun(t *testing.T) {
 		t.Errorf("Run() did not call Update on the current state")
 	}
 
-	// Send event
-	event1 := &MockEvent_Run{}
+	// Send event1 again
 	sm.SendEvent(event1)
 	time.Sleep(200 * time.Millisecond) // let event be processed
 
@@ -341,7 +555,7 @@ func TestRun(t *testing.T) {
 	}
 
 	// Check that Update is not called again after cancellation
-	sm.Cancel()
+	sm.Pause()
 	time.Sleep(200 * time.Millisecond) // let go routine shut down
 	state.updateCalled = false
 	time.Sleep(200 * time.Millisecond) // let update be called if still running
@@ -356,27 +570,131 @@ func TestRun(t *testing.T) {
 	if event2.processCalled {
 		t.Errorf("Run() called HandleEvent after cancellation")
 	}
+
+	// Tear down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 50)
 }
 
-func TestCancel(t *testing.T) {
+func TestStateManager_RunBeforeSetState(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1)
+	buf := new(bytes.Buffer)
+	sms.SetErrorLogger(buf)
+
+	// Send event before setting state and run is called
+	event1 := &MockEvent_Run{}
+	sm.SendEvent(event1)
+	time.Sleep(200 * time.Millisecond) // let event be processed
+	if event1.processCalled {
+		t.Errorf("Run() called Process before state was set")
+	}
+
+	// Try setting state and sending event again
+	testState := &MockState_Run{}
+	sm.SetState(testState)
+	time.Sleep(200 * time.Millisecond) // let event be processed
+	sm.SendEvent(event1)
+	time.Sleep(200 * time.Millisecond) // let event be processed
+	if !event1.processCalled {
+		t.Errorf("Run() didn't call Process after state was set")
+	}
+
+	// Tear down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 50)
+}
+
+type MockState_Pause struct {
+	MockDefaultState
+	entered bool
+}
+
+func TestStateManager_Pause(t *testing.T) {
+	sms := StartStateManagement()
+	sm := sms.NewStateManager(1)
+	time.Sleep(time.Millisecond * 50)
 
 	// Cancel the context
-	sm.Cancel()
+	sm.Pause()
+
+	// Check that state does not en
+	state := &MockState_Pause{}
+	sm.SetState(state)
+	time.Sleep(time.Millisecond * 50)
+	if state.entered {
+		t.Errorf("state entered after Pause")
+	}
 
 	// Check that the context was cancelled
 	if sm.ctx.Err() == nil {
-		t.Errorf("Cancel() did not cancel the context")
+		t.Errorf("Pause() did not cancel the context")
 	}
 
 	// Call Cancel again
-	sm.Cancel()
+	sm.Pause()
 
 	// Check that the context is still cancelled
 	if sm.ctx.Err() == nil {
-		t.Errorf("Cancel() did not maintain the cancellation of the context")
+		t.Errorf("Pause() did not maintain the cancellation of the context")
 	}
+
+	// Tear down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 50)
+}
+
+type MockState_Reset struct {
+	MockDefaultState
+	entered bool
+}
+
+func (s *MockState_Reset) Enter(prevState State) {
+	s.entered = true
+}
+
+func TestStateManager_Reset(t *testing.T) {
+	var actual interface{}
+	var expected interface{}
+	sm := StartStateManagement().NewStateManager(1)
+	state1 := &MockDefaultState{}
+	state2 := &MockDefaultState{}
+	state3 := &MockState_Reset{}
+	sm.SetState(state1)
+	sm.SetState(state2)
+
+	// Check currentState and prevState revert back to InitialState after Reset
+	sm.Reset()
+	time.Sleep(time.Millisecond * 50)
+	switch actual := sm.CurrentState().(type) {
+	case *InitialState: // expected
+	default:
+		t.Errorf("Reset() did not reset currentState correctly | got: %v; want: *InitialState", actual)
+	}
+	switch actual := sm.PreviousState().(type) {
+	case *InitialState: // expected
+	default:
+		t.Errorf("Reset() did not reset prevState correctly | got: %v; want: *InitialState", actual)
+	}
+
+	// Check SetState still changes state after Reset
+	sm.SetState(state3)
+	actual = sm.CurrentState()
+	expected = state3
+	if expected != actual {
+		t.Errorf("Reset() did not set state properly after Reset | got: %v; want: %v", actual, expected)
+	}
+
+	// Check SetState does not call state.Enter after Reset
+	actual = state3.entered
+	expected = false
+	if expected != actual {
+		t.Errorf("Reset() called state.Enter on setting state after Reset")
+	}
+
+	// Tear down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 50)
 }
 
 // CounterEvent is a mock implementation of the Event interface for testing.
@@ -391,15 +709,11 @@ func (e *MockEvent_SendEvent) Process(ctx context.Context) error {
 	return nil
 }
 
-func TestSendEvent(t *testing.T) {
+func TestStateManager_SendEvent(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
 	state := &MockDefaultState{}
+	sm := sms.NewStateManager(1, WithInitialState(state))
 	sm.AddState("mock state", state)
-	sm.SetState(state)
-
-	go sm.Run()
-	time.Sleep(100 * time.Millisecond) // let state manager start running
 
 	// Shared counter
 	var counter int64 = 0
@@ -424,8 +738,9 @@ func TestSendEvent(t *testing.T) {
 		t.Errorf("SendEvent() did not process all events, counter = %v, want 200", counter)
 	}
 
-	sm.Cancel()
-	time.Sleep(100 * time.Millisecond) // let go routine shut down
+	// Tear down
+	sm.Pause()
+	time.Sleep(50 * time.Millisecond)
 }
 
 type MockState_SetErrorLogger struct {
@@ -455,13 +770,15 @@ func (e *MockEvent_SetErrorLogger) Process(ctx context.Context) error {
 	return fmt.Errorf("Process called; test error log")
 }
 
-func TestSetErrorLogger(t *testing.T) {
+func TestSMSystem_SetErrorLogger(t *testing.T) {
 	// Create a new SMSystem
 	sms := StartStateManagement()
 
 	// Add some StateManagers to the SMSystem
-	sm1, _ := sms.NewStateManager(1)
-	sms.NewStateManager(2)
+	testErrorState := &MockState_SetErrorLogger{}
+	sm1 := sms.NewStateManager(1, WithoutRun(), WithInitialState(testErrorState))
+	sm1.AddState("testErrorState", testErrorState)
+	sms.NewStateManager(2, WithoutRun())
 
 	// Create a buffer to use as the logger output
 	buf := new(bytes.Buffer)
@@ -482,9 +799,6 @@ func TestSetErrorLogger(t *testing.T) {
 	}
 
 	// Check that error is written to logger when HandleEvent always returns err
-	testErrorState := &MockState_SetErrorLogger{}
-	sm1.AddState("testErrorState", testErrorState)
-	sm1.SetState(testErrorState)
 	go sm1.Run()
 	testErrorEvent1 := &MockDefaultEvent{}
 	sm1.SendEvent(testErrorEvent1)
@@ -493,6 +807,7 @@ func TestSetErrorLogger(t *testing.T) {
 		t.Errorf("SetErrorLogger() did not correctly write HandleEvent error message to errorLogger output")
 	}
 
+	// Check that error is written to logger when Process always returns err
 	testErrorEvent2 := &MockEvent_SetErrorLogger{}
 	sm1.SendEvent(testErrorEvent2)
 	time.Sleep(time.Millisecond * 100)
@@ -500,10 +815,8 @@ func TestSetErrorLogger(t *testing.T) {
 		t.Errorf("SetErrorLogger() did not correctly write Process error message to errorLogger output")
 	}
 
-	// Check that error is written to logger when Process always returns err
-
-	// Shutdown
-	sm1.Cancel()
+	// Tear down
+	sm1.Pause()
 	time.Sleep(time.Millisecond * 100)
 }
 
@@ -535,14 +848,12 @@ type MockEvent3_ReceiveResponse struct {
 	MockDefaultEvent
 }
 
-func TestReceiveResponse(t *testing.T) {
+func TestStateManager_ReceiveResponse(t *testing.T) {
 	// Setup for test
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
 	testState := &MockState_ReceiveResponse{}
+	sm := sms.NewStateManager(1, WithInitialState(testState))
 	sm.AddState("testState", testState)
-	sm.SetState(testState)
-	go sm.Run()
 
 	testEvent1 := &MockEvent1_ReceiveResponse{}
 	testEvent2 := &MockEvent2_ReceiveResponse{}
@@ -587,7 +898,7 @@ func TestReceiveResponse(t *testing.T) {
 	<-done
 
 	// Shutdown
-	sm.Cancel()
+	sm.Pause()
 	time.Sleep(time.Millisecond * 100)
 
 	// Test receiving response after shutdown
@@ -599,9 +910,30 @@ func TestReceiveResponse(t *testing.T) {
 	}
 }
 
-func TestWithValue(t *testing.T) {
+func TestStateManager_IsRunning(t *testing.T) {
+	sm := StartStateManagement().NewStateManager(1, WithoutRun())
+
+	// Check IsRunning when WithoutRun passed to NewStateManager
+	if sm.IsRunning() {
+		t.Errorf("IsRunning() returned true before state manager was running")
+	}
+
+	go sm.Run()
+	time.Sleep(time.Millisecond * 20)
+
+	// Check IsRunning after manually calling Run
+	if !sm.IsRunning() {
+		t.Errorf("IsRunning() returned false after manually calling Run")
+	}
+
+	// Tear Down
+	sm.Pause()
+	time.Sleep(time.Millisecond * 20)
+}
+
+func TestStateManager_WithValue(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	key := "key"
 	val := "value"
 	sm.WithValue(key, val)
@@ -611,9 +943,9 @@ func TestWithValue(t *testing.T) {
 	}
 }
 
-func TestWithDeadline(t *testing.T) {
+func TestStateManager_WithDeadline(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	deadline := time.Now().Add(10 * time.Second)
 	sm.WithDeadline(deadline)
 
@@ -623,9 +955,9 @@ func TestWithDeadline(t *testing.T) {
 	}
 }
 
-func TestWithTimeout(t *testing.T) {
+func TestStateManager_WithTimeout(t *testing.T) {
 	sms := StartStateManagement()
-	sm, _ := sms.NewStateManager(1)
+	sm := sms.NewStateManager(1, WithoutRun())
 	timeout := 10 * time.Second
 	sm.WithTimeout(timeout)
 
