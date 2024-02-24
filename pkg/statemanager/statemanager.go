@@ -164,7 +164,7 @@ func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManage
 	}
 
 	if stateManager.isRunning.Load() { // can be set by WithoutRun functional option
-		go stateManager.Run()
+		stateManager.Run()
 	}
 	return stateManager
 }
@@ -273,21 +273,28 @@ func (sm *StateManager) ForceState(state State) {
 // updates the current state.
 func (sm *StateManager) Run() {
 	sm.isRunning.Store(true)
-	for {
-		select {
-		case <-sm.ctx.Done():
-			sm.isRunning.Store(false)
-			sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
-			return
-		case event := <-sm.eventChan:
-			err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
-			if err != nil {
-				sm.errorLogger.Println("error handling event: ", err)
-			}
-		default:
-			sm.currentState.Update(sm.ctx)
-		}
+	sm.mutex.Lock()
+	if sm.ctx.Err() != nil {
+		sm.ctx, sm.cancel = context.WithCancel(context.Background())
 	}
+	sm.mutex.Unlock()
+	go func() {
+		for {
+			select {
+			case <-sm.ctx.Done():
+				sm.isRunning.Store(false)
+				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				return
+			case event := <-sm.eventChan:
+				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
+				if err != nil {
+					sm.errorLogger.Println("error handling event: ", err)
+				}
+			default:
+				sm.currentState.Update(sm.ctx)
+			}
+		}
+	}()
 }
 
 // IsRunning returns true if statemanager is running.
