@@ -319,9 +319,12 @@ func (sm *StateManager) Reset() {
 	sm.mutex.Unlock()
 }
 
-// SendEvent sends an event to the StateManager's event channel.
+// SendEvent sends an event to the StateManager's event channel when the
+// StateManager is running.
 func (sm *StateManager) SendEvent(event Event) {
-	sm.eventChan <- event
+	if sm.isRunning.Load() {
+		sm.eventChan <- event
+	}
 }
 
 // ReceiveResponse receives a response from the StateManager's response channel

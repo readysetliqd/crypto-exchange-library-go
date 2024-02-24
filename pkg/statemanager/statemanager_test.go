@@ -712,8 +712,7 @@ func (e *MockEvent_SendEvent) Process(ctx context.Context) error {
 func TestStateManager_SendEvent(t *testing.T) {
 	sms := StartStateManagement()
 	state := &MockDefaultState{}
-	sm := sms.NewStateManager(1, WithInitialState(state))
-	sm.AddState("mock state", state)
+	sm := sms.NewStateManager(1, WithAddState("mock state", state), WithInitialState(state))
 
 	// Shared counter
 	var counter int64 = 0
