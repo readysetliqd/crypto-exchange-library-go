@@ -33,8 +33,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// TODO add trading rate limit to REST API calls
-
 // #region Exported methods for *WebSocketManager Start/Stop<Feature>  (OrderBookManager, TradeLogger, OpenOrderManager, TradingRateLimiter)
 
 // StartOrderBookManager changes the flag for ws.OrderBookMgr to signal new
@@ -683,6 +681,23 @@ func (ws *WebSocketManager) WaitForConnect(timeoutMilliseconds ...uint16) error 
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("timeout reached; check subscriptions and try again")
+	}
+}
+
+// Disconnected returns true if any clients become disconnected after initial
+// startup.
+func (ws *WebSocketManager) Disconnected() bool {
+	return ws.reconnectMgr.numDisconnected.Load() != 0
+}
+
+// WaitForReconnect blocks and waits for reconnected condition broadcasted after
+// all clients are reconnected. Includes another call to Disconnected to prevent
+// blocking in case reconnect happened during your shutdown/pause logic
+func (ws *WebSocketManager) WaitForReconnect() {
+	if ws.Disconnected() {
+		ws.reconnectMgr.mutex.Lock()
+		ws.reconnectMgr.reconnectCond.Wait()
+		ws.reconnectMgr.mutex.Unlock()
 	}
 }
 
@@ -2699,7 +2714,8 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							c.Cancel()
 							c.Conn.Close()
 							if c.attemptReconnect {
-								if c.IsReconnecting.CompareAndSwap(false, true) {
+								if c.isReconnecting.CompareAndSwap(false, true) {
+									c.reconnector.numDisconnected.Add(1)
 									c.reconnect(url)
 								}
 							}
@@ -2709,7 +2725,8 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							c.Cancel()
 							c.Conn.Close()
 							if c.attemptReconnect {
-								if c.IsReconnecting.CompareAndSwap(false, true) {
+								if c.isReconnecting.CompareAndSwap(false, true) {
+									c.reconnector.numDisconnected.Add(1)
 									c.reconnect(url)
 								}
 							}
@@ -2719,7 +2736,8 @@ func (c *WebSocketClient) startMessageReader(url string) {
 							c.Cancel()
 							c.Conn.Close()
 							if c.attemptReconnect {
-								if c.IsReconnecting.CompareAndSwap(false, true) {
+								if c.isReconnecting.CompareAndSwap(false, true) {
+									c.reconnector.numDisconnected.Add(1)
 									c.reconnect(url)
 								}
 							}
@@ -3354,8 +3372,16 @@ func (ws *WebSocketManager) startTradeRateLimiter(pair string) {
 // Helper method that initializes WebSocketClient for public endpoints by
 // dialing Kraken's server and starting its message reader.
 func (kc *KrakenClient) connectPublic() error {
-	kc.WebSocketManager.WebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, resubscriber: kc.WebSocketManager, attemptReconnect: kc.autoReconnect, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger, managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup}
-	kc.WebSocketManager.WebSocketClient.IsReconnecting.Store(false)
+	kc.WebSocketManager.WebSocketClient = &WebSocketClient{
+		Router:           kc.WebSocketManager,
+		resubscriber:     kc.WebSocketManager,
+		attemptReconnect: kc.autoReconnect,
+		isReconnecting:   atomic.Bool{},
+		ErrorLogger:      kc.ErrorLogger,
+		managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup,
+		reconnector:      kc.WebSocketManager.reconnectMgr,
+	}
+	kc.WebSocketManager.WebSocketClient.isReconnecting.Store(false)
 	err := kc.WebSocketManager.WebSocketClient.dialKraken(wsPublicURL)
 	if err != nil {
 		return fmt.Errorf("error dialing kraken public url | %w", err)
@@ -3382,8 +3408,17 @@ func (kc *KrakenClient) connectPrivate() error {
 			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
 		}
 	}
-	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{Router: kc.WebSocketManager, Authenticator: kc, resubscriber: kc.WebSocketManager, attemptReconnect: kc.autoReconnect, IsReconnecting: atomic.Bool{}, ErrorLogger: kc.ErrorLogger, managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup}
-	kc.WebSocketManager.AuthWebSocketClient.IsReconnecting.Store(false)
+	kc.WebSocketManager.AuthWebSocketClient = &WebSocketClient{
+		Router:           kc.WebSocketManager,
+		Authenticator:    kc,
+		resubscriber:     kc.WebSocketManager,
+		attemptReconnect: kc.autoReconnect,
+		isReconnecting:   atomic.Bool{},
+		ErrorLogger:      kc.ErrorLogger,
+		managerWaitGroup: kc.WebSocketManager.ConnectWaitGroup,
+		reconnector:      kc.WebSocketManager.reconnectMgr,
+	}
+	kc.WebSocketManager.AuthWebSocketClient.isReconnecting.Store(false)
 	err = kc.WebSocketManager.AuthWebSocketClient.dialKraken(wsPrivateURL)
 	if err != nil {
 		return fmt.Errorf("error dialing kraken private url | %w", err)
@@ -3404,11 +3439,20 @@ func (c *WebSocketClient) reconnect(url string) error {
 		for {
 			err := c.dialKraken(url)
 			if err != nil {
-				c.ErrorLogger.Printf("encountered error on reconnecting, trying again | %s\n", err)
+				c.ErrorLogger.Printf("error re-dialing, trying again | %s\n", err)
 			} else {
+				// Need to add to WebSocketManager wg because reader always
+				// calls wg.Done() on WSSystemStatus type messages
 				c.managerWaitGroup.Add(1)
-				c.ErrorLogger.Println("reconnect successful")
-				c.IsReconnecting.Store(false)
+				c.reconnector.numDisconnected.Add(-1)
+				c.isReconnecting.Store(false)
+				if c.reconnector.numDisconnected.Load() == 0 {
+					c.reconnector.mutex.Lock()
+					c.reconnector.reconnectCond.Broadcast()
+					c.reconnector.mutex.Unlock()
+					c.ErrorLogger.Println("reconnect successful")
+				}
+				// Unblocks reconnect for rest of code
 				wg.Done()
 				return
 			}
@@ -3423,8 +3467,9 @@ func (c *WebSocketClient) reconnect(url string) error {
 			time.Sleep(time.Duration(t) * time.Second)
 		}
 	}()
+	// Waits for this clients reconnect successful
 	wg.Wait()
-	// Reauthenticate WebSocket token if Private
+	// Reauthenticate WebSocket token if client is Private
 	if url == wsPrivateURL {
 		err := c.Authenticator.AuthenticateWebSockets()
 		if err != nil {

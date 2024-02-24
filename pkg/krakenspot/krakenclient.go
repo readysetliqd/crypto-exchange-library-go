@@ -68,6 +68,7 @@ type APIManager struct {
 type WebSocketManager struct {
 	WebSocketClient      *WebSocketClient
 	AuthWebSocketClient  *WebSocketClient
+	reconnectMgr         *ReconnectManager
 	WebSocketToken       string
 	SubscriptionMgr      *SubscriptionManager
 	OrderBookMgr         *OrderBookManager
@@ -83,17 +84,24 @@ type WebSocketManager struct {
 	Mutex                sync.RWMutex
 }
 
+type ReconnectManager struct {
+	numDisconnected atomic.Int32
+	mutex           sync.Mutex
+	reconnectCond   *sync.Cond
+}
+
 type WebSocketClient struct {
 	Conn             *websocket.Conn
 	Ctx              context.Context
 	Cancel           context.CancelFunc
 	Router           MessageRouter
 	Authenticator    Authenticator
+	reconnector      *ReconnectManager
 	resubscriber     resubscriber
 	attemptReconnect bool
-	IsReconnecting   atomic.Bool
+	isReconnecting   atomic.Bool
 	ErrorLogger      *log.Logger
-	managerWaitGroup *sync.WaitGroup
+	managerWaitGroup *sync.WaitGroup // managerWaitGroup is a reference back to WebSocketManager's ConnectWaitGroup
 	Mutex            sync.Mutex
 }
 
@@ -274,7 +282,12 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, autoRecon
 			isActive: false,
 		},
 		ConnectWaitGroup: &sync.WaitGroup{},
+		reconnectMgr: &ReconnectManager{
+			numDisconnected: atomic.Int32{},
+			mutex:           sync.Mutex{},
+		},
 	}
+	kc.WebSocketManager.reconnectMgr.reconnectCond = sync.NewCond(&kc.WebSocketManager.reconnectMgr.mutex)
 	kc.OrderBookMgr.isTracking.Store(false)
 	kc.TradingRateLimiter.HandleRateLimit.Store(false)
 
