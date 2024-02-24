@@ -168,7 +168,7 @@ func TestSMSystem_NewStateManager(t *testing.T) {
 		if state1.updateCalled {
 			t.Errorf("NewStateManager() calling update when not running")
 		}
-		go sm.Run()
+		sm.Run()
 		time.Sleep(time.Millisecond * 20)
 		if state1.entered {
 			t.Errorf("NewStateManager() called enter when state was set before running")
@@ -435,7 +435,7 @@ func TestStateManager_SetState(t *testing.T) {
 	})
 
 	t.Run("SetState after Run", func(t *testing.T) {
-		go sm.Run()
+		sm.Run()
 		time.Sleep(time.Millisecond * 50)
 		// Check state1 Enter was called and Exit was not called
 		sm.SetState(state1)
@@ -537,7 +537,7 @@ func TestStateManager_Run(t *testing.T) {
 	}
 
 	sm.SetState(state)
-	go sm.Run()
+	sm.Run()
 	time.Sleep(200 * time.Millisecond) // let state manager start running
 
 	// Check that Update was called
@@ -798,7 +798,7 @@ func TestSMSystem_SetErrorLogger(t *testing.T) {
 	}
 
 	// Check that error is written to logger when HandleEvent always returns err
-	go sm1.Run()
+	sm1.Run()
 	testErrorEvent1 := &MockDefaultEvent{}
 	sm1.SendEvent(testErrorEvent1)
 	time.Sleep(time.Millisecond * 100)
@@ -917,7 +917,7 @@ func TestStateManager_IsRunning(t *testing.T) {
 		t.Errorf("IsRunning() returned true before state manager was running")
 	}
 
-	go sm.Run()
+	sm.Run()
 	time.Sleep(time.Millisecond * 20)
 
 	// Check IsRunning after manually calling Run
