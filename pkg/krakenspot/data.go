@@ -495,6 +495,7 @@ type TradeInfo struct {
 	PortionMarginFreed  string   `json:"cmargin"`
 	PortionClosedPnL    string   `json:"net"`
 	Trades              []string `json:"trades"`
+	Maker               bool     `json:"maker"`
 }
 
 type OpenPosition struct {
