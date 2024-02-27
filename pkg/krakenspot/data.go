@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -133,9 +134,11 @@ type TickerDailyInfoInt struct {
 func (ti *TickerBookInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
-		return err
+		return fmt.Errorf("%w | %w", ErrUnexpectedJSONInput, err)
 	}
-	if len(v) >= 3 {
+	if len(v) != 3 {
+		return fmt.Errorf("%w | incorrect length", ErrUnexpectedJSONInput)
+	} else {
 		ti.Price = v[0]
 		ti.WholeLotVolume = v[1]
 		ti.LotVolume = v[2]
@@ -146,9 +149,11 @@ func (ti *TickerBookInfo) UnmarshalJSON(data []byte) error {
 func (ti *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
-		return err
+		return fmt.Errorf("%w | %w", ErrUnexpectedJSONInput, err)
 	}
-	if len(v) >= 2 {
+	if len(v) != 2 {
+		return fmt.Errorf("%w | incorrect length", ErrUnexpectedJSONInput)
+	} else {
 		ti.Price = v[0]
 		ti.LotVolume = v[1]
 	}
@@ -293,6 +298,7 @@ type Trade struct {
 	Direction string
 	OrderType string
 	Misc      string
+	TradeID   float64
 }
 
 func (tr *TradesResp) UnmarshalJSON(data []byte) error {
@@ -319,7 +325,10 @@ func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 			trades := make(TradeSlice, len(tradeData))
 			for i, td := range tradeData {
 				tradeInfo, ok := td.([]interface{})
-				if !ok || len(tradeInfo) != 6 {
+				if !ok || len(tradeInfo) != 7 {
+					//DEBUG
+					log.Println(len(tradeInfo))
+					log.Println(tradeInfo)
 					err = fmt.Errorf("error asserting 'tradeData' to []interface{} or not enough data")
 					return err
 				}
@@ -330,6 +339,7 @@ func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 					Direction: tradeInfo[3].(string),
 					OrderType: tradeInfo[4].(string),
 					Misc:      tradeInfo[5].(string),
+					TradeID:   tradeInfo[6].(float64),
 				}
 			}
 			tr.Trades = trades
