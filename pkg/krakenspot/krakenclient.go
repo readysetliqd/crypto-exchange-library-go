@@ -87,6 +87,7 @@ type WebSocketManager struct {
 type ReconnectManager struct {
 	numDisconnected atomic.Int32
 	mutex           sync.Mutex
+	disconnectCond  *sync.Cond
 	reconnectCond   *sync.Cond
 }
 
