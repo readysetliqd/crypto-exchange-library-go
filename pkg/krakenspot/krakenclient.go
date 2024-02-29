@@ -289,6 +289,7 @@ func NewKrakenClient(apiKey, apiSecret string, verificationTier uint8, autoRecon
 		},
 	}
 	kc.WebSocketManager.reconnectMgr.reconnectCond = sync.NewCond(&kc.WebSocketManager.reconnectMgr.mutex)
+	kc.WebSocketManager.reconnectMgr.disconnectCond = sync.NewCond(&kc.WebSocketManager.reconnectMgr.mutex)
 	kc.OrderBookMgr.isTracking.Store(false)
 	kc.TradingRateLimiter.HandleRateLimit.Store(false)
 
