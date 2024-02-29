@@ -163,9 +163,11 @@ func (ti *TickerLastTradeInfo) UnmarshalJSON(data []byte) error {
 func (ti *TickerDailyInfo) UnmarshalJSON(data []byte) error {
 	var v []string
 	if err := json.Unmarshal(data, &v); err != nil {
-		return err
+		return fmt.Errorf("%w | %w", ErrUnexpectedJSONInput, err)
 	}
-	if len(v) >= 2 {
+	if len(v) != 2 {
+		return fmt.Errorf("%w | incorrect length", ErrUnexpectedJSONInput)
+	} else {
 		ti.Today = v[0]
 		ti.Last24Hours = v[1]
 	}
@@ -175,9 +177,11 @@ func (ti *TickerDailyInfo) UnmarshalJSON(data []byte) error {
 func (ti *TickerDailyInfoInt) UnmarshalJSON(data []byte) error {
 	var v []int
 	if err := json.Unmarshal(data, &v); err != nil {
-		return err
+		return fmt.Errorf("%w | %w", ErrUnexpectedJSONInput, err)
 	}
-	if len(v) >= 2 {
+	if len(v) != 2 {
+		return fmt.Errorf("%w | incorrect length", ErrUnexpectedJSONInput)
+	} else {
 		ti.Today = v[0]
 		ti.Last24Hours = v[1]
 	}
