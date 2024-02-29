@@ -690,6 +690,14 @@ func (ws *WebSocketManager) Disconnected() bool {
 	return ws.reconnectMgr.numDisconnected.Load() != 0
 }
 
+func (ws *WebSocketManager) WaitForDisconnect() {
+	if ws.Disconnected() {
+		ws.reconnectMgr.mutex.Lock()
+		ws.reconnectMgr.disconnectCond.Wait()
+		ws.reconnectMgr.mutex.Unlock()
+	}
+}
+
 // WaitForReconnect blocks and waits for reconnected condition broadcasted after
 // all clients are reconnected. Includes another call to Disconnected to prevent
 // blocking in case reconnect happened during your shutdown/pause logic
@@ -2708,44 +2716,51 @@ func (c *WebSocketClient) startMessageReader(url string) {
 			default:
 				_, msg, err := c.Conn.ReadMessage()
 				if err != nil {
-					if err != nil {
-						if err, ok := err.(net.Error); ok && err.Timeout() {
-							c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
-							c.Cancel()
-							c.Conn.Close()
-							if c.attemptReconnect {
-								if c.isReconnecting.CompareAndSwap(false, true) {
-									c.reconnector.numDisconnected.Add(1)
-									c.reconnect(url)
+					if err, ok := err.(net.Error); ok && err.Timeout() {
+						c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
+						c.Cancel()
+						c.Conn.Close()
+						if c.attemptReconnect {
+							if c.isReconnecting.CompareAndSwap(false, true) {
+								if c.reconnector.numDisconnected.Load() == 0 {
+									c.reconnector.disconnectCond.Broadcast()
 								}
+								c.reconnector.numDisconnected.Add(1)
+								c.reconnect(url)
 							}
-							return
-						} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
-							c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect to url |", url)
-							c.Cancel()
-							c.Conn.Close()
-							if c.attemptReconnect {
-								if c.isReconnecting.CompareAndSwap(false, true) {
-									c.reconnector.numDisconnected.Add(1)
-									c.reconnect(url)
-								}
-							}
-							return
-						} else if strings.Contains(err.Error(), "wsarecv") {
-							c.ErrorLogger.Println("internet connection lost, attempting reconnect to url |", url)
-							c.Cancel()
-							c.Conn.Close()
-							if c.attemptReconnect {
-								if c.isReconnecting.CompareAndSwap(false, true) {
-									c.reconnector.numDisconnected.Add(1)
-									c.reconnect(url)
-								}
-							}
-							return
 						}
-						c.ErrorLogger.Println("error reading message |", err)
-						continue
+						return
+					} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
+						c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect to url |", url)
+						c.Cancel()
+						c.Conn.Close()
+						if c.attemptReconnect {
+							if c.isReconnecting.CompareAndSwap(false, true) {
+								if c.reconnector.numDisconnected.Load() == 0 {
+									c.reconnector.disconnectCond.Broadcast()
+								}
+								c.reconnector.numDisconnected.Add(1)
+								c.reconnect(url)
+							}
+						}
+						return
+					} else if strings.Contains(err.Error(), "wsarecv") {
+						c.ErrorLogger.Println("internet connection lost, attempting reconnect to url |", url)
+						c.Cancel()
+						c.Conn.Close()
+						if c.attemptReconnect {
+							if c.isReconnecting.CompareAndSwap(false, true) {
+								if c.reconnector.numDisconnected.Load() == 0 {
+									c.reconnector.disconnectCond.Broadcast()
+								}
+								c.reconnector.numDisconnected.Add(1)
+								c.reconnect(url)
+							}
+						}
+						return
 					}
+					c.ErrorLogger.Println("error reading message |", err)
+					continue
 				}
 				if !bytes.Equal(heartbeat, msg) { // not a heartbeat message
 					err := c.Router.routeMessage(msg)
