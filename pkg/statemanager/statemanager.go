@@ -18,6 +18,15 @@ import (
 	"time"
 )
 
+// StateManager run type
+const (
+	withoutRun int8 = iota
+	defaultUpdateInterval
+	customUpdateInterval
+	withoutUpdate
+	continuousUpdate
+)
+
 // #region data structures
 
 // SMSystem is a system that manages multiple StateManagers.
@@ -29,16 +38,18 @@ type SMSystem struct {
 
 // StateManager manages the states and transitions of a single instance.
 type StateManager struct {
-	isRunning    atomic.Bool
-	states       map[string]State
-	currentState State
-	prevState    State
-	eventChan    chan Event
-	responseChan chan interface{}
-	errorLogger  *log.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mutex        sync.RWMutex
+	isRunning      atomic.Bool
+	states         map[string]State
+	currentState   State
+	prevState      State
+	eventChan      chan Event
+	responseChan   chan interface{}
+	runType        int8
+	updateInterval time.Duration
+	errorLogger    *log.Logger
+	ctx            context.Context
+	cancel         context.CancelFunc
+	mutex          sync.RWMutex
 }
 
 // State represents a state in the state machine.
@@ -128,11 +139,24 @@ func (s *InitialState) HandleEvent(ctx context.Context, event Event, responseCha
 //	// WithInitialState sets the currentState field of a StateManager to the given state. Defaults to InitialState type if not passed. Prints error message if nil state is passed and returns effectively leaving currentState as default.
 //	func WithInitialState(initialState State) NewStateManagerOption
 //
-//	// WithoutRun prevents the StateManager from calling the Run method on startup. Defaults to calling Run on startup.
-//	func WithoutRun() NewStateManagerOption
-//
 //	// WithAddState adds the state to the states map on initialization. Identical functionality as StateManager.AddState
-//	func WithAddState(stateName string, state State) NewStateManagerOption {
+//	func WithAddState(stateName string, state State) NewStateManagerOption
+//
+// The following WithRunType<type> methods set how NewStateManager calls Run on
+// startup. They are mutually exclusive; Only call one at a time if any. Defaults
+// to Run if none are called
+//
+//	// WithRunTypeNoRun prevents the StateManager from calling the Run method on startup.
+//	func WithRunTypeNoRun() NewStateManagerOption
+//
+//	// WithRunTypeNoUpdate calls RunWithoutUpdate method on startup.
+//	func WithRunTypeNoUpdate() NewStateManagerOption
+//
+//	// WithRunTypeCustomUpdate calls Run(interval) method on startup where arg 'interval' is the time which the go routine sleeps between Update calls.
+//	func WithRunTypeCustomUpdate(interval time.Duration) NewStateManagerOption
+//
+//	// WithRunTypeContinuousUpdate calls RunWithContinuous method on startup. Generally this is not recommended as it's compute heavy.
+//	func WithRunTypeContinuousUpdate() NewStateManagerOption
 func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManagerOption) *StateManager {
 	sms.mutex.Lock()
 	defer sms.mutex.Unlock()
@@ -145,17 +169,18 @@ func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManage
 	// Instance with default values
 	ctx, cancel := context.WithCancel(context.Background())
 	stateManager := &StateManager{
-		isRunning:    atomic.Bool{},
-		currentState: &InitialState{},
-		prevState:    &InitialState{},
-		states:       make(map[string]State),
-		eventChan:    make(chan Event, 3),
-		responseChan: make(chan interface{}),
-		errorLogger:  sms.errorLogger,
-		ctx:          ctx,
-		cancel:       cancel,
+		isRunning:      atomic.Bool{},
+		currentState:   &InitialState{},
+		prevState:      &InitialState{},
+		states:         make(map[string]State),
+		eventChan:      make(chan Event, 3),
+		responseChan:   make(chan interface{}),
+		runType:        defaultUpdateInterval,
+		updateInterval: time.Nanosecond * 1,
+		errorLogger:    sms.errorLogger,
+		ctx:            ctx,
+		cancel:         cancel,
 	}
-	stateManager.isRunning.Store(true)
 	sms.stateManagers[instanceID] = stateManager
 
 	// Apply functional options
@@ -163,8 +188,17 @@ func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManage
 		opt(stateManager)
 	}
 
-	if stateManager.isRunning.Load() { // can be set by WithoutRun functional option
+	switch stateManager.runType {
+	case withoutRun:
+		// do nothing
+	case defaultUpdateInterval:
 		stateManager.Run()
+	case customUpdateInterval:
+		stateManager.Run(stateManager.updateInterval)
+	case withoutUpdate:
+		stateManager.RunWithoutUpdate()
+	case continuousUpdate:
+		stateManager.RunContinuousUpdate()
 	}
 	return stateManager
 }
@@ -270,14 +304,65 @@ func (sm *StateManager) ForceState(state State) {
 }
 
 // Run starts the main loop of the StateManager, which handles events and
-// updates the current state.
-func (sm *StateManager) Run() {
+// updates the current state. Accepts zero or one optional arg 'updateInterval'
+// which is the time between which the goroutine calls the currentState.Update
+// method again. Defaults to one nanosecond, though in practice, will Update
+// at the rate of your system's smallest time granularity. If state updates are
+// not required, call RunWithoutUpdate instead.
+func (sm *StateManager) Run(updateInterval ...time.Duration) error {
+	if sm.isRunning.Load() {
+		return fmt.Errorf("error calling run, statemanager already running")
+	}
+	if len(updateInterval) > 1 {
+		return fmt.Errorf("error too many args; expected 0 or 1")
+	}
+	dur := time.Nanosecond * 1
+	if len(updateInterval) > 0 {
+		dur = updateInterval[0]
+	}
 	sm.isRunning.Store(true)
 	sm.mutex.Lock()
 	if sm.ctx.Err() != nil {
 		sm.ctx, sm.cancel = context.WithCancel(context.Background())
 	}
 	sm.mutex.Unlock()
+
+	ticker := time.NewTicker(dur)
+	go func() {
+		for {
+			select {
+			case <-sm.ctx.Done():
+				sm.isRunning.Store(false)
+				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				return
+			case event := <-sm.eventChan:
+				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
+				if err != nil {
+					sm.errorLogger.Println("error handling event: ", err)
+				}
+			case <-ticker.C:
+				sm.currentState.Update(sm.ctx)
+			}
+		}
+	}()
+	return nil
+}
+
+// RunContinuousUpdate starts the main loop of the StateManager, which handles
+// events and updates the current state continuously with a busy loop. Not
+// recommended for general use unless your hardware has multiple free cores;
+// use Run instead.
+func (sm *StateManager) RunContinuousUpdate() error {
+	if sm.isRunning.Load() {
+		return fmt.Errorf("error calling run, statemanager already running")
+	}
+	sm.isRunning.Store(true)
+	sm.mutex.Lock()
+	if sm.ctx.Err() != nil {
+		sm.ctx, sm.cancel = context.WithCancel(context.Background())
+	}
+	sm.mutex.Unlock()
+
 	go func() {
 		for {
 			select {
@@ -295,6 +380,40 @@ func (sm *StateManager) Run() {
 			}
 		}
 	}()
+	return nil
+}
+
+// RunWithoutUpdate starts the main loop of the StateManager, which handles
+// events and skips calling Update method on current state. Recommended, when
+// custom Update methods are not needed (default is no-op), or when calling
+// Update from your own program.
+func (sm *StateManager) RunWithoutUpdate() error {
+	if sm.isRunning.Load() {
+		return fmt.Errorf("error calling run, statemanager already running")
+	}
+	sm.isRunning.Store(true)
+	sm.mutex.Lock()
+	if sm.ctx.Err() != nil {
+		sm.ctx, sm.cancel = context.WithCancel(context.Background())
+	}
+	sm.mutex.Unlock()
+
+	go func() {
+		for {
+			select {
+			case <-sm.ctx.Done():
+				sm.isRunning.Store(false)
+				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				return
+			case event := <-sm.eventChan:
+				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
+				if err != nil {
+					sm.errorLogger.Println("error handling event: ", err)
+				}
+			}
+		}
+	}()
+	return nil
 }
 
 // IsRunning returns true if statemanager is running.

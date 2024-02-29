@@ -157,8 +157,8 @@ func TestSMSystem_NewStateManager(t *testing.T) {
 		sms.DeleteStateManager(1)
 	})
 
-	t.Run("WithoutRun", func(t *testing.T) {
-		sm := sms.NewStateManager(1, WithoutRun())
+	t.Run("WithRunTypeNoRun", func(t *testing.T) {
+		sm := sms.NewStateManager(1, WithRunTypeNoRun())
 		state1 := &MockState_NewStateManager{}
 		sm.SetState(state1)
 		time.Sleep(time.Millisecond * 20)
@@ -246,7 +246,7 @@ func TestSMSystem_DeleteStateManager(t *testing.T) {
 func TestStateManager_AddState(t *testing.T) {
 	sms := StartStateManagement()
 	state := &MockState{}
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	sm.AddState("mock state", state)
 	if sm.states["mock state"] != state {
 		t.Errorf("AddState() state was not correctly added to the map sm.states[\"mock state\"]: %v; want: %v", sm.states["mock state"], state)
@@ -262,7 +262,7 @@ func TestStateManager_AddState(t *testing.T) {
 
 func TestStateManager_DeleteState(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	state := &MockState{}
 	sm.AddState("mock state", state)
 
@@ -286,7 +286,7 @@ func TestStateManager_DeleteState(t *testing.T) {
 
 func TestStateManager_GetState(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	state := &MockState{}
 	sm.AddState("mock state", state)
 
@@ -314,7 +314,7 @@ func TestStateManager_GetState(t *testing.T) {
 
 func TestStateManager_CurrentState(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 
 	// Check current state type is InitialState before setting state
 	currentState := sm.CurrentState()
@@ -344,7 +344,7 @@ func TestStateManager_CurrentState(t *testing.T) {
 
 func TestStateManager_PreviousState(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 
 	// Check previous state type is InitialState before setting state
 	prevState := sm.PreviousState()
@@ -390,7 +390,7 @@ func (s *MockState_SetState) Exit(nextState State) {
 
 func TestStateManager_SetState(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	state1 := &MockState_SetState{
 		entered: false,
 		exited:  false,
@@ -522,7 +522,7 @@ func (e *MockEvent_Run) Process(ctx context.Context) error {
 func TestStateManager_Run(t *testing.T) {
 	// Setup
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	state := &MockState_Run{}
 	sm.AddState("mock state", state)
 
@@ -775,9 +775,9 @@ func TestSMSystem_SetErrorLogger(t *testing.T) {
 
 	// Add some StateManagers to the SMSystem
 	testErrorState := &MockState_SetErrorLogger{}
-	sm1 := sms.NewStateManager(1, WithoutRun(), WithInitialState(testErrorState))
+	sm1 := sms.NewStateManager(1, WithRunTypeNoRun(), WithInitialState(testErrorState))
 	sm1.AddState("testErrorState", testErrorState)
-	sms.NewStateManager(2, WithoutRun())
+	sms.NewStateManager(2, WithRunTypeNoRun())
 
 	// Create a buffer to use as the logger output
 	buf := new(bytes.Buffer)
@@ -910,7 +910,7 @@ func TestStateManager_ReceiveResponse(t *testing.T) {
 }
 
 func TestStateManager_IsRunning(t *testing.T) {
-	sm := StartStateManagement().NewStateManager(1, WithoutRun())
+	sm := StartStateManagement().NewStateManager(1, WithRunTypeNoRun())
 
 	// Check IsRunning when WithoutRun passed to NewStateManager
 	if sm.IsRunning() {
@@ -932,7 +932,7 @@ func TestStateManager_IsRunning(t *testing.T) {
 
 func TestStateManager_WithValue(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	key := "key"
 	val := "value"
 	sm.WithValue(key, val)
@@ -944,7 +944,7 @@ func TestStateManager_WithValue(t *testing.T) {
 
 func TestStateManager_WithDeadline(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	deadline := time.Now().Add(10 * time.Second)
 	sm.WithDeadline(deadline)
 
@@ -956,7 +956,7 @@ func TestStateManager_WithDeadline(t *testing.T) {
 
 func TestStateManager_WithTimeout(t *testing.T) {
 	sms := StartStateManagement()
-	sm := sms.NewStateManager(1, WithoutRun())
+	sm := sms.NewStateManager(1, WithRunTypeNoRun())
 	timeout := 10 * time.Second
 	sm.WithTimeout(timeout)
 

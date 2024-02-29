@@ -1,5 +1,7 @@
 package statemanager
 
+import "time"
+
 // StateManagerOption is a type for the option functions that modify a StateManager
 type NewStateManagerOption func(*StateManager)
 
@@ -16,11 +18,51 @@ func WithInitialState(initialState State) NewStateManagerOption {
 	}
 }
 
-// WithoutRun prevents the StateManager from calling the Run method on startup.
-// Defaults to calling Run on startup.
-func WithoutRun() NewStateManagerOption {
+// WithRunTypeNoRun prevents the StateManager from calling the Run method on
+// startup.
+//
+// Note: Default without this option is calling Run on startup. Mutually
+// exclusive with other WithRunType<type> methods, only call one of these
+// methods per NewStateManager.
+func WithRunTypeNoRun() NewStateManagerOption {
 	return func(sm *StateManager) {
-		sm.isRunning.Store(false) // set the isRunning flag to true to skip the Run method
+		sm.runType = withoutRun
+	}
+}
+
+// WithRunTypeNoUpdate calls RunWithoutUpdate method on startup.
+//
+// Note: Default without this option is calling Run on startup. Mutually
+// exclusive with other WithRunType<type> methods, only call one of these
+// methods per NewStateManager.
+func WithRunTypeNoUpdate() NewStateManagerOption {
+	return func(sm *StateManager) {
+		sm.runType = withoutUpdate
+	}
+}
+
+// WithRunTypeCustomUpdate calls Run(interval) method on startup where arg
+// 'interval' is the time which the go routine sleeps between Update calls.
+//
+// Note: Default without this option is calling Run on startup. Mutually
+// exclusive with other WithRunType<type> methods, only call one of these
+// methods per NewStateManager.
+func WithRunTypeCustomUpdate(interval time.Duration) NewStateManagerOption {
+	return func(sm *StateManager) {
+		sm.updateInterval = interval
+		sm.runType = customUpdateInterval
+	}
+}
+
+// WithRunTypeContinuousUpdate calls RunWithContinuous method on startup.
+// Generally this is not recommended as it's compute heavy.
+//
+// Note: Default without this option is calling Run on startup. Mutually
+// exclusive with other WithRunType<type> methods, only call one of these
+// methods per NewStateManager.
+func WithRunTypeContinuousUpdate() NewStateManagerOption {
+	return func(sm *StateManager) {
+		sm.runType = continuousUpdate
 	}
 }
 
