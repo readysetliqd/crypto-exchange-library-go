@@ -2722,7 +2722,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 						c.Conn.Close()
 						if c.attemptReconnect {
 							if c.isReconnecting.CompareAndSwap(false, true) {
-								if c.reconnector.numDisconnected.Load() == 0 {
+								if c.reconnector.numDisconnected.Load() == 0 { // only broadcast on the first disconnect
 									c.reconnector.disconnectCond.Broadcast()
 								}
 								c.reconnector.numDisconnected.Add(1)
@@ -2736,7 +2736,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 						c.Conn.Close()
 						if c.attemptReconnect {
 							if c.isReconnecting.CompareAndSwap(false, true) {
-								if c.reconnector.numDisconnected.Load() == 0 {
+								if c.reconnector.numDisconnected.Load() == 0 { // only broadcast on the first disconnect
 									c.reconnector.disconnectCond.Broadcast()
 								}
 								c.reconnector.numDisconnected.Add(1)
@@ -2750,7 +2750,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 						c.Conn.Close()
 						if c.attemptReconnect {
 							if c.isReconnecting.CompareAndSwap(false, true) {
-								if c.reconnector.numDisconnected.Load() == 0 {
+								if c.reconnector.numDisconnected.Load() == 0 { // only broadcast on the first disconnect
 									c.reconnector.disconnectCond.Broadcast()
 								}
 								c.reconnector.numDisconnected.Add(1)
