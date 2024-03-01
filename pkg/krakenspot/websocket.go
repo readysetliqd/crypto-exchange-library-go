@@ -691,11 +691,9 @@ func (ws *WebSocketManager) Disconnected() bool {
 }
 
 func (ws *WebSocketManager) WaitForDisconnect() {
-	if ws.Disconnected() {
-		ws.reconnectMgr.mutex.Lock()
-		ws.reconnectMgr.disconnectCond.Wait()
-		ws.reconnectMgr.mutex.Unlock()
-	}
+	ws.reconnectMgr.mutex.Lock()
+	ws.reconnectMgr.disconnectCond.Wait()
+	ws.reconnectMgr.mutex.Unlock()
 }
 
 // WaitForReconnect blocks and waits for reconnected condition broadcasted after
