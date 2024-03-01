@@ -47,6 +47,7 @@ type StateManager struct {
 	runType        int8
 	updateInterval time.Duration
 	errorLogger    *log.Logger
+	cond           *sync.Cond
 	ctx            context.Context
 	cancel         context.CancelFunc
 	mutex          sync.RWMutex
@@ -181,6 +182,7 @@ func (sms *SMSystem) NewStateManager(instanceID int32, options ...NewStateManage
 		ctx:            ctx,
 		cancel:         cancel,
 	}
+	stateManager.cond = sync.NewCond(&stateManager.mutex)
 	sms.stateManagers[instanceID] = stateManager
 
 	// Apply functional options
@@ -316,31 +318,44 @@ func (sm *StateManager) Run(updateInterval ...time.Duration) error {
 	if len(updateInterval) > 1 {
 		return fmt.Errorf("error too many args; expected 0 or 1")
 	}
+	// Default update interval overwritten below if 'updateInterval' is passed
 	dur := time.Nanosecond * 1
+	sm.isRunning.Store(true)
+	// set update interval for go routine and set most recent run type, often
+	// redundant, but necessary if NewStateManager was called WithRunTypeWithoutRun
+	sm.mutex.Lock()
 	if len(updateInterval) > 0 {
 		dur = updateInterval[0]
+		sm.updateInterval = dur
+		sm.runType = customUpdateInterval
+	} else {
+		sm.runType = defaultUpdateInterval
 	}
-	sm.isRunning.Store(true)
-	sm.mutex.Lock()
+	// reset ctx with cancel if it's been cancelled before
 	if sm.ctx.Err() != nil {
 		sm.ctx, sm.cancel = context.WithCancel(context.Background())
 	}
 	sm.mutex.Unlock()
 
+	// set ticker to update interval (default or custom)
 	ticker := time.NewTicker(dur)
 	go func() {
 		for {
 			select {
+			// stop state manager running if context is cancelled
 			case <-sm.ctx.Done():
 				sm.isRunning.Store(false)
 				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				sm.mutex.Lock()
+				sm.cond.Broadcast()
+				sm.mutex.Unlock()
 				return
-			case event := <-sm.eventChan:
+			case event := <-sm.eventChan: // process events
 				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
 				if err != nil {
 					sm.errorLogger.Println("error handling event: ", err)
 				}
-			case <-ticker.C:
+			case <-ticker.C: // call Update every interval
 				sm.currentState.Update(sm.ctx)
 			}
 		}
@@ -358,6 +373,7 @@ func (sm *StateManager) RunContinuousUpdate() error {
 	}
 	sm.isRunning.Store(true)
 	sm.mutex.Lock()
+	sm.runType = continuousUpdate
 	if sm.ctx.Err() != nil {
 		sm.ctx, sm.cancel = context.WithCancel(context.Background())
 	}
@@ -369,6 +385,9 @@ func (sm *StateManager) RunContinuousUpdate() error {
 			case <-sm.ctx.Done():
 				sm.isRunning.Store(false)
 				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				sm.mutex.Lock()
+				sm.cond.Broadcast()
+				sm.mutex.Unlock()
 				return
 			case event := <-sm.eventChan:
 				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
@@ -393,6 +412,7 @@ func (sm *StateManager) RunWithoutUpdate() error {
 	}
 	sm.isRunning.Store(true)
 	sm.mutex.Lock()
+	sm.runType = withoutUpdate
 	if sm.ctx.Err() != nil {
 		sm.ctx, sm.cancel = context.WithCancel(context.Background())
 	}
@@ -404,6 +424,9 @@ func (sm *StateManager) RunWithoutUpdate() error {
 			case <-sm.ctx.Done():
 				sm.isRunning.Store(false)
 				sm.errorLogger.Println("state manager stopped |", sm.ctx.Err())
+				sm.mutex.Lock()
+				sm.cond.Broadcast()
+				sm.mutex.Unlock()
 				return
 			case event := <-sm.eventChan:
 				err := sm.currentState.HandleEvent(sm.ctx, event, sm.responseChan)
@@ -443,6 +466,38 @@ func (sm *StateManager) Reset() {
 	sm.currentState = &InitialState{}
 	sm.prevState = &InitialState{}
 	sm.mutex.Unlock()
+}
+
+// Restart cancels StateManager if it is currently running then runs the
+// StateManager with the last used Run<type> configuration and interval.
+// Intended use is to call this method after reconnects. Does nothing if
+// StateManager was never running.
+func (sm *StateManager) Restart() {
+	if sm.isRunning.Load() {
+		sm.cancel()
+		sm.mutex.Lock()
+		sm.cond.Wait()
+		sm.mutex.Unlock()
+	}
+	sm.mutex.Lock()
+
+	switch sm.runType {
+	case withoutRun:
+		sm.mutex.Unlock()
+		// do nothing
+	case defaultUpdateInterval:
+		sm.mutex.Unlock()
+		sm.Run()
+	case customUpdateInterval:
+		sm.mutex.Unlock()
+		sm.Run(sm.updateInterval)
+	case withoutUpdate:
+		sm.mutex.Unlock()
+		sm.RunWithoutUpdate()
+	case continuousUpdate:
+		sm.mutex.Unlock()
+		sm.RunContinuousUpdate()
+	}
 }
 
 // SendEvent sends an event to the StateManager's event channel when the
