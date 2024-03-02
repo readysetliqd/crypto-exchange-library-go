@@ -585,9 +585,9 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
-		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
-	})
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
 
@@ -609,9 +609,9 @@ func (kc *KrakenClient) ConnectPublic(systemStatusCallback func(status string)) 
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
-		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
-	})
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
 
@@ -637,9 +637,9 @@ func (kc *KrakenClient) ConnectPrivate(systemStatusCallback func(status string))
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
-		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
-	})
+	kc.WebSocketManager.Mutex.Lock()
+	kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	kc.WebSocketManager.Mutex.Unlock()
 	return nil
 }
 
@@ -1572,9 +1572,9 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 //		}
 //	}
 func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orderStatus interface{})) {
-	ws.orderStatuscallbackOnce.Do(func() {
-		ws.orderStatusCallback = orderStatusCallback
-	})
+	ws.Mutex.Lock()
+	ws.orderStatusCallback = orderStatusCallback
+	ws.Mutex.RUnlock()
 }
 
 // Sends an 'orderType' order request on the side 'direction' (buy or sell) of
@@ -2940,8 +2940,11 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 	switch v := msg.Content.(type) {
 	case WSAddOrderResp:
-		if ws.orderStatusCallback != nil {
-			ws.orderStatusCallback(v)
+		ws.Mutex.RLock()
+		callback := ws.orderStatusCallback
+		ws.Mutex.RLock()
+		if callback != nil {
+			callback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2961,8 +2964,11 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSEditOrderResp:
-		if ws.orderStatusCallback != nil {
-			ws.orderStatusCallback(v)
+		ws.Mutex.RLock()
+		callback := ws.orderStatusCallback
+		ws.Mutex.RLock()
+		if callback != nil {
+			callback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2982,8 +2988,11 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelOrderResp:
-		if ws.orderStatusCallback != nil {
-			ws.orderStatusCallback(v)
+		ws.Mutex.RLock()
+		callback := ws.orderStatusCallback
+		ws.Mutex.RLock()
+		if callback != nil {
+			callback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -3003,12 +3012,18 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelAllResp:
-		if ws.orderStatusCallback != nil {
-			ws.orderStatusCallback(v)
+		ws.Mutex.RLock()
+		callback := ws.orderStatusCallback
+		ws.Mutex.RLock()
+		if callback != nil {
+			callback(v)
 		}
 	case WSCancelAllAfterResp:
-		if ws.orderStatusCallback != nil {
-			ws.orderStatusCallback(v)
+		ws.Mutex.RLock()
+		callback := ws.orderStatusCallback
+		ws.Mutex.RLock()
+		if callback != nil {
+			callback(v)
 		}
 	}
 	return nil
@@ -3059,8 +3074,11 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 		}
 	case WSSystemStatus:
 		ws.ConnectWaitGroup.Done()
-		if ws.systemStatusCallback != nil {
-			ws.systemStatusCallback(v.Status)
+		ws.Mutex.RLock()
+		callback := ws.systemStatusCallback
+		ws.Mutex.RUnlock()
+		if callback != nil {
+			callback(v.Status)
 		}
 	case WSPong:
 		ws.ErrorLogger.Println("pong | reqid: ", v.ReqID)
