@@ -1517,8 +1517,7 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 // Sets OrderStatusCallback to the function passed to arg 'orderStatus'. This
 // function determines the behavior of the program when orderStatus type
 // messages are received. Recommended to use with a switch case for each of
-// the order status types. Only works once, if resetting new callback is needed
-// reinstantiate KrakenClient.
+// the order status types.
 //
 // # Order Status Types:
 //
