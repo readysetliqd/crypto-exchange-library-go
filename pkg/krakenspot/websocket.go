@@ -1573,7 +1573,7 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orderStatus interface{})) {
 	ws.Mutex.Lock()
 	ws.orderStatusCallback = orderStatusCallback
-	ws.Mutex.RUnlock()
+	ws.Mutex.Unlock()
 }
 
 // Sends an 'orderType' order request on the side 'direction' (buy or sell) of
