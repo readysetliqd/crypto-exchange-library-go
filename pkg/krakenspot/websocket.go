@@ -234,9 +234,9 @@ func (ws *WebSocketManager) StopOpenOrderManager() error {
 		close(ws.OpenOrdersMgr.ch)
 		ws.OpenOrdersMgr.wg.Wait()
 		// clear map
-		ws.OpenOrdersMgr.Mutex.Lock()
+		ws.OpenOrdersMgr.mu.Lock()
 		ws.OpenOrdersMgr.OpenOrders = nil
-		ws.OpenOrdersMgr.Mutex.Unlock()
+		ws.OpenOrdersMgr.mu.Unlock()
 		return nil
 	}
 	return fmt.Errorf("OpenOrderManager is already stopped")
@@ -1312,9 +1312,9 @@ func (ws *WebSocketManager) SubscribeOpenOrders(callback GenericCallback, option
 		return fmt.Errorf("error calling subscribeprivate method | %w", err)
 	}
 	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
-		ws.OpenOrdersMgr.Mutex.Lock()
+		ws.OpenOrdersMgr.mu.Lock()
 		ws.OpenOrdersMgr.seq = 0
-		ws.OpenOrdersMgr.Mutex.Unlock()
+		ws.OpenOrdersMgr.mu.Unlock()
 	}
 	return nil
 }
@@ -1409,8 +1409,8 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 		return fmt.Errorf("%w: expected 0 or 1", ErrTooManyArgs)
 	}
 
-	ws.SubscriptionMgr.Mutex.Lock()
-	defer ws.SubscriptionMgr.Mutex.Unlock()
+	ws.SubscriptionMgr.mu.Lock()
+	defer ws.SubscriptionMgr.mu.Unlock()
 
 	// iterate over all active subscriptions stored in SubscriptionMgr and call
 	// corresponding Unsubscribe<channel> method
@@ -1517,7 +1517,8 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 // Sets OrderStatusCallback to the function passed to arg 'orderStatus'. This
 // function determines the behavior of the program when orderStatus type
 // messages are received. Recommended to use with a switch case for each of
-// the order status types.
+// the order status types. Only works once, if resetting new callback is needed
+// reinstantiate KrakenClient.
 //
 // # Order Status Types:
 //
@@ -1571,9 +1572,9 @@ func (ws *WebSocketManager) UnsubscribeAll(reqID ...string) error {
 //		}
 //	}
 func (ws *WebSocketManager) SetOrderStatusCallback(orderStatusCallback func(orderStatus interface{})) {
-	ws.Mutex.Lock()
-	ws.OrderStatusCallback = orderStatusCallback
-	ws.Mutex.Unlock()
+	ws.orderStatuscallbackOnce.Do(func() {
+		ws.orderStatusCallback = orderStatusCallback
+	})
 }
 
 // Sends an 'orderType' order request on the side 'direction' (buy or sell) of
@@ -2093,7 +2094,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 	if !ws.OrderBookMgr.isTracking.Load() {
 		return fmt.Errorf("must use StartOrderBookManager() before subscribing to book")
 	}
-	ws.SubscriptionMgr.Mutex.RLock()
+	ws.SubscriptionMgr.mu.RLock()
 	depth := uint16(10)
 	if _, ok := ws.SubscriptionMgr.PublicSubscriptions["book-10"][pair]; !ok {
 		bookSubscribed := false
@@ -2102,7 +2103,7 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 				_, depthCut, _ := strings.Cut(book, "-")
 				depth64, err := strconv.ParseUint(depthCut, 10, 16)
 				if err != nil {
-					ws.SubscriptionMgr.Mutex.RUnlock()
+					ws.SubscriptionMgr.mu.RUnlock()
 					return fmt.Errorf("error parsing uint")
 				}
 				depth = uint16(depth64)
@@ -2111,15 +2112,15 @@ func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef
 			}
 		}
 		if !bookSubscribed {
-			ws.SubscriptionMgr.Mutex.RUnlock()
+			ws.SubscriptionMgr.mu.RUnlock()
 			return fmt.Errorf("no active book subscription for pair \"%s\"", pair)
 		}
 	}
 	if _, ok := ws.SubscriptionMgr.PrivateSubscriptions["openOrders"]; !ok {
-		ws.SubscriptionMgr.Mutex.RUnlock()
+		ws.SubscriptionMgr.mu.RUnlock()
 		return fmt.Errorf("no active \"openOrders\" subscription")
 	}
-	ws.SubscriptionMgr.Mutex.RUnlock()
+	ws.SubscriptionMgr.mu.RUnlock()
 
 	// Initialize new LimitChase and add to LimitChaseOrders map
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2259,8 +2260,8 @@ func (ws *WebSocketManager) ListBids(pair string, depth uint16) ([]InternalBookE
 
 // Returns a map of the current state of open orders managed by StartOpenOrderManager().
 func (ws *WebSocketManager) MapOpenOrders() map[string]WSOpenOrder {
-	ws.OpenOrdersMgr.Mutex.RLock()
-	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+	ws.OpenOrdersMgr.mu.RLock()
+	defer ws.OpenOrdersMgr.mu.RUnlock()
 	return ws.OpenOrdersMgr.OpenOrders
 }
 
@@ -2268,7 +2269,7 @@ func (ws *WebSocketManager) MapOpenOrders() map[string]WSOpenOrder {
 // by price.
 func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSOpenOrder, error) {
 	var openOrders []map[string]WSOpenOrder
-	ws.OpenOrdersMgr.Mutex.RLock()
+	ws.OpenOrdersMgr.mu.RLock()
 	for id, order := range ws.OpenOrdersMgr.OpenOrders {
 		if order.Description.Pair == pair {
 			newOrder := make(map[string]WSOpenOrder)
@@ -2276,7 +2277,7 @@ func (ws *WebSocketManager) ListOpenOrdersForPair(pair string) ([]map[string]WSO
 			openOrders = append(openOrders, newOrder)
 		}
 	}
-	ws.OpenOrdersMgr.Mutex.RUnlock()
+	ws.OpenOrdersMgr.mu.RUnlock()
 	sort.Slice(openOrders, func(i, j int) bool {
 		for id1 := range openOrders[i] {
 			for id2 := range openOrders[j] {
@@ -2375,8 +2376,8 @@ func (ws *WebSocketManager) LogOpenOrders(filename string, overwrite ...bool) er
 	}
 	defer file.Close()
 
-	ws.OpenOrdersMgr.Mutex.RLock()
-	defer ws.OpenOrdersMgr.Mutex.RUnlock()
+	ws.OpenOrdersMgr.mu.RLock()
+	defer ws.OpenOrdersMgr.mu.RUnlock()
 
 	// Build map of open orders by pair and sorted by price ascending
 	logOrders := make(map[string][]map[string]WSOpenOrder)
@@ -2475,7 +2476,7 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	sub := newSub(channelName, pair, callback)
 
 	// check if map is nil and assign Subscription to map
-	ws.SubscriptionMgr.Mutex.Lock()
+	ws.SubscriptionMgr.mu.Lock()
 	if ws.SubscriptionMgr.PublicSubscriptions[channelName] == nil {
 		ws.SubscriptionMgr.PublicSubscriptions[channelName] = make(map[string]*Subscription)
 	}
@@ -2485,12 +2486,12 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	// processes finish deleting pair from book before creating a new one
 	// FIXME code will likely be reached and slow down when resubscribing
 	if _, ok := ws.SubscriptionMgr.PublicSubscriptions[channelName][pair]; ok {
-		ws.SubscriptionMgr.Mutex.Unlock()
+		ws.SubscriptionMgr.mu.Unlock()
 		time.Sleep(time.Millisecond * 300)
-		ws.SubscriptionMgr.Mutex.Lock()
+		ws.SubscriptionMgr.mu.Lock()
 	}
 	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
-	ws.SubscriptionMgr.Mutex.Unlock()
+	ws.SubscriptionMgr.mu.Unlock()
 
 	// Build payload and send subscription message
 	ws.WebSocketClient.Mutex.Lock()
@@ -2514,9 +2515,9 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 					sub.closeChannels()
 					// Delete subscription from map if not attempting reconnect
 					if !ws.WebSocketClient.attemptReconnect {
-						ws.SubscriptionMgr.Mutex.Lock()
+						ws.SubscriptionMgr.mu.Lock()
 						delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
-						ws.SubscriptionMgr.Mutex.Unlock()
+						ws.SubscriptionMgr.mu.Unlock()
 					}
 					return
 				}
@@ -2524,9 +2525,9 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 				if sub.DoneChanClosed == 0 { // channel is open
 					sub.closeChannels()
 					// Delete subscription from map
-					ws.SubscriptionMgr.Mutex.Lock()
+					ws.SubscriptionMgr.mu.Lock()
 					delete(ws.SubscriptionMgr.PublicSubscriptions[channelName], pair)
-					ws.SubscriptionMgr.Mutex.Unlock()
+					ws.SubscriptionMgr.mu.Unlock()
 					return
 				}
 			case data := <-sub.DataChan:
@@ -2556,9 +2557,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	sub := newSub(channelName, "", callback)
 
 	// Assign Subscription to map
-	ws.SubscriptionMgr.Mutex.Lock()
+	ws.SubscriptionMgr.mu.Lock()
 	ws.SubscriptionMgr.PrivateSubscriptions[channelName] = sub
-	ws.SubscriptionMgr.Mutex.Unlock()
+	ws.SubscriptionMgr.mu.Unlock()
 
 	// Build payload and send subscription message
 	ws.AuthWebSocketClient.Mutex.Lock()
@@ -2584,9 +2585,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 						sub.closeChannels()
 						// Delete subscription from map if not attempting reconnect
 						if !ws.WebSocketClient.attemptReconnect {
-							ws.SubscriptionMgr.Mutex.Lock()
+							ws.SubscriptionMgr.mu.Lock()
 							delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-							ws.SubscriptionMgr.Mutex.Unlock()
+							ws.SubscriptionMgr.mu.Unlock()
 						}
 						return
 					}
@@ -2594,9 +2595,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 					if sub.DoneChanClosed == 0 { // channel is open
 						sub.closeChannels()
 						// Delete subscription from map
-						ws.SubscriptionMgr.Mutex.Lock()
+						ws.SubscriptionMgr.mu.Lock()
 						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-						ws.SubscriptionMgr.Mutex.Unlock()
+						ws.SubscriptionMgr.mu.Unlock()
 						return
 					}
 				case data := <-sub.DataChan:
@@ -2651,9 +2652,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 						sub.closeChannels()
 						// Delete subscription from map if not attempting reconnect
 						if !ws.WebSocketClient.attemptReconnect {
-							ws.SubscriptionMgr.Mutex.Lock()
+							ws.SubscriptionMgr.mu.Lock()
 							delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-							ws.SubscriptionMgr.Mutex.Unlock()
+							ws.SubscriptionMgr.mu.Unlock()
 						}
 						return
 					}
@@ -2661,9 +2662,9 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 					if sub.DoneChanClosed == 0 { // channel is open
 						sub.closeChannels()
 						// Delete subscription from map
-						ws.SubscriptionMgr.Mutex.Lock()
+						ws.SubscriptionMgr.mu.Lock()
 						delete(ws.SubscriptionMgr.PrivateSubscriptions, channelName)
-						ws.SubscriptionMgr.Mutex.Unlock()
+						ws.SubscriptionMgr.mu.Unlock()
 						return
 					}
 				case data := <-sub.DataChan:
@@ -2829,27 +2830,37 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 	case WSTickerResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	case WSOHLCResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	case WSTradeResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	case WSSpreadResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	case WSBookUpdateResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 		// limit chase orders, send to appropriate channels if limit chase exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2873,7 +2884,9 @@ func (ws *WebSocketManager) routePublicMessage(msg *GenericArrayMessage) error {
 	case WSBookSnapshotResp:
 		// send to channel if open
 		if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	default:
 		return fmt.Errorf("cannot route unknown channel name | %s", msg.ChannelName)
@@ -2887,11 +2900,15 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 	switch v := msg.Content.(type) {
 	case WSOwnTradesResp:
 		if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 	case WSOpenOrdersResp:
 		if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChanClosed == 0 {
+			ws.SubscriptionMgr.mu.RLock()
 			ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].DataChan <- v
+			ws.SubscriptionMgr.mu.RUnlock()
 		}
 		// Limit-chase orders; send to appropriate channel if limit chase exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2923,8 +2940,8 @@ func (ws *WebSocketManager) routePrivateMessage(msg *GenericArrayMessage) error 
 func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 	switch v := msg.Content.(type) {
 	case WSAddOrderResp:
-		if ws.OrderStatusCallback != nil {
-			ws.OrderStatusCallback(v)
+		if ws.orderStatusCallback != nil {
+			ws.orderStatusCallback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2944,8 +2961,8 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSEditOrderResp:
-		if ws.OrderStatusCallback != nil {
-			ws.OrderStatusCallback(v)
+		if ws.orderStatusCallback != nil {
+			ws.orderStatusCallback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2965,8 +2982,8 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelOrderResp:
-		if ws.OrderStatusCallback != nil {
-			ws.OrderStatusCallback(v)
+		if ws.orderStatusCallback != nil {
+			ws.orderStatusCallback(v)
 		}
 		// send to appropriate limit chase if exists
 		ws.LimitChaseMgr.Mutex.RLock()
@@ -2986,12 +3003,12 @@ func (ws *WebSocketManager) routeOrderMessage(msg *GenericMessage) error {
 		}
 		ws.LimitChaseMgr.Mutex.RUnlock()
 	case WSCancelAllResp:
-		if ws.OrderStatusCallback != nil {
-			ws.OrderStatusCallback(v)
+		if ws.orderStatusCallback != nil {
+			ws.orderStatusCallback(v)
 		}
 	case WSCancelAllAfterResp:
-		if ws.OrderStatusCallback != nil {
-			ws.OrderStatusCallback(v)
+		if ws.orderStatusCallback != nil {
+			ws.orderStatusCallback(v)
 		}
 	}
 	return nil
@@ -3007,23 +3024,33 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 			ws.SubscriptionMgr.SubscribeWaitGroup.Done()
 			if publicChannelNames[v.ChannelName] {
 				if ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].ConfirmedChanClosed == 0 {
+					ws.SubscriptionMgr.mu.RLock()
 					ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].confirmSubscription()
+					ws.SubscriptionMgr.mu.RUnlock()
 				}
 			} else if privateChannelNames[v.ChannelName] {
 				if ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].ConfirmedChanClosed == 0 {
+					ws.SubscriptionMgr.mu.RLock()
 					ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].confirmSubscription()
+					ws.SubscriptionMgr.mu.RUnlock()
 				}
 			}
 		case "unsubscribed":
 			if publicChannelNames[v.ChannelName] {
+				ws.SubscriptionMgr.mu.RLock()
 				ws.SubscriptionMgr.PublicSubscriptions[v.ChannelName][v.Pair].unsubscribe()
+				ws.SubscriptionMgr.mu.RUnlock()
 				if strings.HasPrefix(v.ChannelName, "book") {
 					if ws.OrderBookMgr.isTracking.Load() {
+						ws.OrderBookMgr.mu.RLock()
 						ws.OrderBookMgr.OrderBooks[v.ChannelName][v.Pair].unsubscribe()
+						ws.OrderBookMgr.mu.RUnlock()
 					}
 				}
 			} else if privateChannelNames[v.ChannelName] {
+				ws.SubscriptionMgr.mu.RLock()
 				ws.SubscriptionMgr.PrivateSubscriptions[v.ChannelName].unsubscribe()
+				ws.SubscriptionMgr.mu.RUnlock()
 			}
 		case "error":
 			return fmt.Errorf("subscribe/unsubscribe error msg received. operation not completed; check inputs and try again | %s", v.ErrorMessage)
@@ -3291,15 +3318,19 @@ func (ws *WebSocketManager) handleTradeLoggerError(errorMessage string, err erro
 	}
 }
 
-// startOpenOrderManager() is a helper function meant to be run as a go routine. Starts a loop that reads
-// from ws.OpenOrdersMgr.ch and either builds the initial state of the currently
-// open orders or it updates the state removing and adding orders as necessary
+// startOpenOrderManager() starts a loop that reads from ws.OpenOrdersMgr.ch and
+// either builds the initial state of the currently open orders or it updates
+// the state removing and adding orders as necessary. This helper function is meant
+// to be run as a go routine.
 func (ws *WebSocketManager) startOpenOrderManager() {
 	ws.OpenOrdersMgr.wg.Add(1)
 	defer ws.OpenOrdersMgr.wg.Done()
 
 	for data := range ws.OpenOrdersMgr.ch {
-		if data.Sequence != ws.OpenOrdersMgr.seq+1 {
+		ws.OpenOrdersMgr.mu.RLock()
+		seq := ws.OpenOrdersMgr.seq
+		ws.OpenOrdersMgr.mu.RUnlock()
+		if data.Sequence != seq+1 {
 			ws.ErrorLogger.Println("improper open orders sequence; unsubscribing channel and resubscribing")
 			err := ws.UnsubscribeOpenOrders()
 			if err != nil {
@@ -3313,6 +3344,7 @@ func (ws *WebSocketManager) startOpenOrderManager() {
 				return
 			}
 		} else {
+			ws.OpenOrdersMgr.mu.Lock()
 			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
 			if ws.OpenOrdersMgr.seq == 1 {
 				// Build initial state of open orders
@@ -3340,6 +3372,7 @@ func (ws *WebSocketManager) startOpenOrderManager() {
 					}
 				}
 			}
+			ws.OpenOrdersMgr.mu.Unlock()
 		}
 	}
 }
@@ -3650,19 +3683,19 @@ func (ws *WebSocketManager) bookCallback(channelName, pair string, depth uint16,
 		} else if msg, ok := data.(WSBookSnapshotResp); ok { // data is book snapshot
 			// make book-depth map if not exists
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; !ok {
-				ws.OrderBookMgr.Mutex.Lock()
+				ws.OrderBookMgr.mu.Lock()
 				ws.OrderBookMgr.OrderBooks[channelName] = make(map[string]*InternalOrderBook)
-				ws.OrderBookMgr.Mutex.Unlock()
+				ws.OrderBookMgr.mu.Unlock()
 			}
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName][pair]; !ok {
-				ws.OrderBookMgr.Mutex.Lock()
+				ws.OrderBookMgr.mu.Lock()
 				ws.OrderBookMgr.OrderBooks[channelName][pair] = &InternalOrderBook{
 					DataChan:       make(chan WSBookUpdateResp),
 					DoneChan:       make(chan struct{}),
 					DataChanClosed: 0,
 					DoneChanClosed: 0,
 				}
-				ws.OrderBookMgr.Mutex.Unlock()
+				ws.OrderBookMgr.mu.Unlock()
 				if err := ws.OrderBookMgr.OrderBooks[channelName][pair].buildInitialBook(&msg.OrderBook); err != nil {
 					ws.SubscriptionMgr.SubscribeWaitGroup.Done()
 					ws.ErrorLogger.Printf("error building initial state of book; sending unsubscribe msg; try subscribing again | %s\n", err)
@@ -3779,7 +3812,7 @@ func (ws *WebSocketManager) closeAndDeleteBook(ob *InternalOrderBook, pair, chan
 	if ob.DoneChanClosed == 0 {
 		ob.closeChannels()
 		// Delete subscription from book
-		ws.OrderBookMgr.Mutex.Lock()
+		ws.OrderBookMgr.mu.Lock()
 		if ws.OrderBookMgr.OrderBooks != nil {
 			if _, ok := ws.OrderBookMgr.OrderBooks[channelName]; ok {
 				delete(ws.OrderBookMgr.OrderBooks[channelName], pair)
@@ -3789,7 +3822,7 @@ func (ws *WebSocketManager) closeAndDeleteBook(ob *InternalOrderBook, pair, chan
 		} else {
 			ws.ErrorLogger.Println("UnsubscribeBook error | OrderBooks is nil")
 		}
-		ws.OrderBookMgr.Mutex.Unlock()
+		ws.OrderBookMgr.mu.Unlock()
 	}
 }
 

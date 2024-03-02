@@ -79,7 +79,8 @@ type WebSocketManager struct {
 	BalanceMgr               *BalanceManager
 	systemStatusCallback     func(status string)
 	systemStatusCallbackOnce sync.Once
-	OrderStatusCallback      func(orderStatus interface{})
+	orderStatusCallback      func(orderStatus interface{})
+	orderStatuscallbackOnce  sync.Once
 	ConnectWaitGroup         *sync.WaitGroup
 	ErrorLogger              *log.Logger
 	Mutex                    sync.RWMutex
@@ -128,7 +129,7 @@ type resubscriber interface {
 type OrderBookManager struct {
 	OrderBooks map[string]map[string]*InternalOrderBook
 	isTracking atomic.Bool
-	Mutex      sync.RWMutex
+	mu         sync.RWMutex
 }
 
 // Keeps track of all open subscriptions
@@ -136,7 +137,7 @@ type SubscriptionManager struct {
 	PublicSubscriptions  map[string]map[string]*Subscription
 	PrivateSubscriptions map[string]*Subscription
 	SubscribeWaitGroup   sync.WaitGroup
-	Mutex                sync.RWMutex
+	mu                   sync.RWMutex
 }
 
 type TradeLogger struct {
@@ -158,7 +159,7 @@ type OpenOrderManager struct {
 	seq        int
 	wg         sync.WaitGroup
 	isTracking atomic.Bool
-	Mutex      sync.RWMutex
+	mu         sync.RWMutex
 }
 
 type TradingRateLimiter struct {
