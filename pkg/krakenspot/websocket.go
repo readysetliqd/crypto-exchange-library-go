@@ -585,9 +585,9 @@ func (kc *KrakenClient) Connect(systemStatusCallback func(status string)) error 
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.Mutex.Lock()
-	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
-	kc.WebSocketManager.Mutex.Unlock()
+	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
+		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	})
 	return nil
 }
 
@@ -609,9 +609,9 @@ func (kc *KrakenClient) ConnectPublic(systemStatusCallback func(status string)) 
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.Mutex.Lock()
-	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
-	kc.WebSocketManager.Mutex.Unlock()
+	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
+		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	})
 	return nil
 }
 
@@ -637,9 +637,9 @@ func (kc *KrakenClient) ConnectPrivate(systemStatusCallback func(status string))
 	if err != nil {
 		return err
 	}
-	kc.WebSocketManager.Mutex.Lock()
-	kc.WebSocketManager.SystemStatusCallback = systemStatusCallback
-	kc.WebSocketManager.Mutex.Unlock()
+	kc.WebSocketManager.systemStatusCallbackOnce.Do(func() {
+		kc.WebSocketManager.systemStatusCallback = systemStatusCallback
+	})
 	return nil
 }
 
@@ -3032,8 +3032,8 @@ func (ws *WebSocketManager) routeGeneralMessage(msg *GenericMessage) error {
 		}
 	case WSSystemStatus:
 		ws.ConnectWaitGroup.Done()
-		if ws.SystemStatusCallback != nil {
-			ws.SystemStatusCallback(v.Status)
+		if ws.systemStatusCallback != nil {
+			ws.systemStatusCallback(v.Status)
 		}
 	case WSPong:
 		ws.ErrorLogger.Println("pong | reqid: ", v.ReqID)

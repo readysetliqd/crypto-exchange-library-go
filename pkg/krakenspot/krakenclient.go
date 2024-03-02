@@ -66,22 +66,23 @@ type APIManager struct {
 
 // WebSocket API
 type WebSocketManager struct {
-	WebSocketClient      *WebSocketClient
-	AuthWebSocketClient  *WebSocketClient
-	reconnectMgr         *ReconnectManager
-	WebSocketToken       string
-	SubscriptionMgr      *SubscriptionManager
-	OrderBookMgr         *OrderBookManager
-	TradeLogger          *TradeLogger
-	OpenOrdersMgr        *OpenOrderManager
-	TradingRateLimiter   *TradingRateLimiter
-	LimitChaseMgr        *LimitChaseManager
-	BalanceMgr           *BalanceManager
-	SystemStatusCallback func(status string)
-	OrderStatusCallback  func(orderStatus interface{})
-	ConnectWaitGroup     *sync.WaitGroup
-	ErrorLogger          *log.Logger
-	Mutex                sync.RWMutex
+	WebSocketClient          *WebSocketClient
+	AuthWebSocketClient      *WebSocketClient
+	reconnectMgr             *ReconnectManager
+	WebSocketToken           string
+	SubscriptionMgr          *SubscriptionManager
+	OrderBookMgr             *OrderBookManager
+	TradeLogger              *TradeLogger
+	OpenOrdersMgr            *OpenOrderManager
+	TradingRateLimiter       *TradingRateLimiter
+	LimitChaseMgr            *LimitChaseManager
+	BalanceMgr               *BalanceManager
+	systemStatusCallback     func(status string)
+	systemStatusCallbackOnce sync.Once
+	OrderStatusCallback      func(orderStatus interface{})
+	ConnectWaitGroup         *sync.WaitGroup
+	ErrorLogger              *log.Logger
+	Mutex                    sync.RWMutex
 }
 
 type ReconnectManager struct {
