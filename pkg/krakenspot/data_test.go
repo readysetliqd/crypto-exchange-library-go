@@ -194,3 +194,132 @@ func TestTickerDailyInfoInt_UnmarshalJSON(t *testing.T) {
 		}
 	})
 }
+
+func TestOHLCResp_UnmarshalJSON(t *testing.T) {
+	var got interface{}
+	var want interface{}
+	var err error
+	t.Run("valid input", func(t *testing.T) {
+		validInput := `{
+			"XXBTZUSD":[
+			[1688671200,"30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896",23],
+			[1688671260,"30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871",18]
+			], 
+		"last":1688672160}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(validInput), &ohlcResp)
+		if err != nil {
+			t.Errorf("UnmarshalJSON() error on valid input | got: %v, want: nil", err)
+		}
+		got = len(ohlcResp.Data)
+		// Even though there's two slices, one gets unmarshalled into Current
+		want = 1
+		if got != want {
+			t.Errorf("UnmarshalJSON() did not unmarshal correct length of data | got: %v, want: %v", got, want)
+		}
+		got = ohlcResp.Last
+		want = uint64(1688672160)
+		if got != want {
+			t.Errorf("UnmarshalJSON() didn't unmarshal Last correctly | got: %v, want: %v", got, want)
+		}
+		got = ohlcResp.Ticker
+		want = "XXBTZUSD"
+		if got != want {
+			t.Errorf("UnmarshalJSON() didn't unmarshal Ticker correctly | got: %v, want: %v", got, want)
+		}
+		got = ohlcResp.Current.Close
+		want = "30300.0"
+		if got != want {
+			t.Errorf("UnmarshalJSON() didn't unmarshal Current.Close correctly | got: %v, want: %v", got, want)
+		}
+		got = ohlcResp.Data[0].Time
+		want = uint64(1688671200)
+		if got != want {
+			t.Errorf("UnmarshalJSON() didn't unmarshal ohlcResp.Data[0].Time correctly | got: %v, want: %v", got, want)
+		}
+		got = ohlcResp.Data[0].Count
+		want = uint32(23)
+		if got != want {
+			t.Errorf("UnmarshalJSON() didn't unmarshal ohlcResp.Data[0].Count correctly | got: %v, want: %v", got, want)
+		}
+	})
+
+	t.Run("not a json object", func(t *testing.T) {
+		invalidInput := "not a json object"
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidInput), &ohlcResp)
+		if err == nil {
+			t.Errorf("UnmarshalJSON() nil error on invalid input | got: nil, want: non-nil")
+		}
+	})
+
+	t.Run("invalid last field type", func(t *testing.T) {
+		invalidField := `{
+			"XXBTZUSD":[
+			[1688671200,"30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896",23],
+			[1688671260,"30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871",18]
+			], 
+		"last":"1688672160"}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidField), &ohlcResp)
+		if !errors.Is(err, ErrUnexpectedJSONInput) {
+			t.Errorf("UnmarshalJSON() didn't throw expected error on invalid input | got: %v, want: %v", err, ErrUnexpectedJSONInput)
+		}
+	})
+
+	t.Run("invalid key type", func(t *testing.T) {
+		invalidField := `{
+			135123:[
+			[1688671200,"30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896",23],
+			[1688671260,"30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871",18]
+			], 
+		"last":1688672160}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidField), &ohlcResp)
+		if err == nil {
+			t.Errorf("UnmarshalJSON() nil error on invalid input | got: nil, want: non-nil")
+		}
+	})
+
+	t.Run("invalid data slice field type", func(t *testing.T) {
+		invalidField := `{
+			"XXBTZUSD":[
+			["1688671200","30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896",23],
+			["1688671260","30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871",18]
+			], 
+		"last":1688672160}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidField), &ohlcResp)
+		if !errors.Is(err, ErrUnexpectedJSONInput) {
+			t.Errorf("UnmarshalJSON() didn't throw expected error on invalid input | got: %v, want: %v", err, ErrUnexpectedJSONInput)
+		}
+	})
+
+	t.Run("invalid data slice field type", func(t *testing.T) {
+		invalidField := `{
+			"XXBTZUSD":[
+			["1688671200","30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896",23],
+			["1688671260","30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871",18]
+			], 
+		"last":1688672160}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidField), &ohlcResp)
+		if !errors.Is(err, ErrUnexpectedJSONInput) {
+			t.Errorf("UnmarshalJSON() didn't throw expected error on invalid input | got: %v, want: %v", err, ErrUnexpectedJSONInput)
+		}
+	})
+
+	t.Run("invalid data slice length", func(t *testing.T) {
+		invalidField := `{
+			"XXBTZUSD":[
+			[1688671200,"30306.1","30306.2","30305.7","30305.7","30306.1","3.39243896"],
+			[1688671260,"30304.5","30304.5","30300.0","30300.0","30300.0","4.42996871"]
+			], 
+		"last":1688672160}`
+		ohlcResp := OHLCResp{}
+		err = json.Unmarshal([]byte(invalidField), &ohlcResp)
+		if !errors.Is(err, ErrUnexpectedJSONInput) {
+			t.Errorf("UnmarshalJSON() didn't throw expected error on invalid input | got: %v, want: %v", err, ErrUnexpectedJSONInput)
+		}
+	})
+}

@@ -222,10 +222,10 @@ func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return fmt.Errorf("error unmarshalling data to map | %w", err)
 	}
-	if last, ok := dataMap["last"].(float64); ok {
-		ohlc.Last = uint64(last)
+	if last, ok := dataMap["last"].(float64); !ok {
+		return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
 	} else {
-		return fmt.Errorf("\"last\" assertion error")
+		ohlc.Last = uint64(last)
 	}
 	for key := range dataMap {
 		if key != "last" {
@@ -236,20 +236,42 @@ func (ohlc *OHLCResp) UnmarshalJSON(data []byte) error {
 			}
 			ohlc.Data = make(OHLCDataSlice, len(tempDataSlice)-1)
 			for i, v := range tempDataSlice {
-				item, ok := v.([]interface{})
+				items, ok := v.([]interface{})
 				if !ok {
 					return fmt.Errorf("OHLCData item assertion error")
 				}
-				ohlcData := OHLCData{
-					Time:   uint64(item[0].(float64)),
-					Open:   item[1].(string),
-					High:   item[2].(string),
-					Low:    item[3].(string),
-					Close:  item[4].(string),
-					VWAP:   item[5].(string),
-					Volume: item[6].(string),
-					Count:  uint32(item[7].(float64)),
+				if len(items) != 8 {
+					return fmt.Errorf("unexpected array length | %w", ErrUnexpectedJSONInput)
 				}
+				ohlcData := OHLCData{}
+				time, ok := items[0].(float64)
+				if !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				count, ok := items[7].(float64)
+				if !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.Open, ok = items[1].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.High, ok = items[2].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.Low, ok = items[3].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.Close, ok = items[4].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.VWAP, ok = items[5].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				if ohlcData.Volume, ok = items[6].(string); !ok {
+					return fmt.Errorf("assertion error | %w", ErrUnexpectedJSONInput)
+				}
+				ohlcData.Time = uint64(time)
+				ohlcData.Count = uint32(count)
 				if i == len(tempDataSlice)-1 {
 					ohlc.Current = ohlcData
 				} else {
