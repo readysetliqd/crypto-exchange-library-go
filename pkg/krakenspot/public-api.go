@@ -384,20 +384,21 @@ func ListTopVolumeLast24Hours(num ...uint16) ([]TickerVolume, error) {
 				"USDT":  true,
 				"ZUSD":  true,
 			}
-			if usdEquivalents[(*allPairs)[ticker].Quote] {
+			switch {
+			case usdEquivalents[(*allPairs)[ticker].Quote]:
 				volume, vwap, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
 				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				// Handle cases where USD is base currency
-			} else if (*allPairs)[ticker].Base == "ZUSD" {
+			case (*allPairs)[ticker].Base == "ZUSD":
 				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
 				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: volume})
-			} else {
+			default:
 				// Find matching pair with base and quote USD equivalent to normalize to USD volume
 				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
 					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"ZUSD", tickers)
@@ -641,7 +642,7 @@ func callPublicApi(endpoint string, target interface{}) error {
 }
 
 // Parses volume and VWAP from tickers using ticker for volume and pair for VWAP
-func parseVolumeVwap(ticker string, pair string, tickers *map[string]TickerInfo) (float64, float64, error) {
+func parseVolumeVwap(ticker, pair string, tickers *map[string]TickerInfo) (float64, float64, error) {
 	volume, err := strconv.ParseFloat((*tickers)[ticker].Volume.Last24Hours, 64)
 	if err != nil {
 		return 0, 0, err

@@ -203,9 +203,10 @@ func (ws *WebSocketManager) StopTradeLogger() error {
 //		log.Println(orders)
 //	}
 func (ws *WebSocketManager) StartOpenOrderManager() error {
-	if ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load() {
+	switch {
+	case ws.OpenOrdersMgr != nil && ws.OpenOrdersMgr.isTracking.Load():
 		return fmt.Errorf("OpenOrderManager is already running")
-	} else if ws.OpenOrdersMgr == nil {
+	case ws.OpenOrdersMgr == nil:
 		ws.OpenOrdersMgr = &OpenOrderManager{
 			OpenOrders: make(map[string]WSOpenOrder),
 			ch:         make(chan (WSOpenOrdersResp)),
@@ -213,11 +214,11 @@ func (ws *WebSocketManager) StartOpenOrderManager() error {
 		}
 		ws.OpenOrdersMgr.isTracking.Store(true)
 		go ws.startOpenOrderManager()
-	} else if ws.OpenOrdersMgr.isTracking.CompareAndSwap(false, true) {
+	case ws.OpenOrdersMgr.isTracking.CompareAndSwap(false, true):
 		ws.OpenOrdersMgr.ch = make(chan WSOpenOrdersResp)
 		ws.OpenOrdersMgr.seq = 0
 		go ws.startOpenOrderManager()
-	} else {
+	default:
 		return fmt.Errorf("an error occurred starting OpenOrderManager")
 	}
 
@@ -2778,26 +2779,28 @@ func (c *WebSocketClient) startMessageReader(url string) {
 // route<messageType>Message method to call.
 func (ws *WebSocketManager) routeMessage(msg []byte) error {
 	var err error
-	if msg[0] == '[' { // public or private websocket message
+	switch {
+	case msg[0] == '[': // public or private websocket message
 		var dataArray GenericArrayMessage
 		err = json.Unmarshal(msg, &dataArray)
 		if err != nil {
 			err = fmt.Errorf("error unmarshalling message | %w", err)
 			return err
 		}
-		if publicChannelNames[dataArray.ChannelName] {
+		switch {
+		case publicChannelNames[dataArray.ChannelName]:
 			if err = ws.routePublicMessage(&dataArray); err != nil {
 				return fmt.Errorf("error routing public message | %w", err)
 			}
-		} else if privateChannelNames[dataArray.ChannelName] {
+		case privateChannelNames[dataArray.ChannelName]:
 			if err = ws.routePrivateMessage(&dataArray); err != nil {
 				return fmt.Errorf("error routing private message | %w", err)
 			}
-		} else {
+		default:
 			err = fmt.Errorf("unknown channel name | %s", dataArray.ChannelName)
 			return err
 		}
-	} else if msg[0] == '{' { // general/system messages, subscription status, and order response messages
+	case msg[0] == '{': // general/system messages, subscription status, and order response messages
 		var dataObject GenericMessage
 		err = json.Unmarshal(msg, &dataObject)
 		if err != nil {
@@ -2815,8 +2818,7 @@ func (ws *WebSocketManager) routeMessage(msg []byte) error {
 		} else {
 			return fmt.Errorf("unknown event type")
 		}
-
-	} else {
+	default:
 		return fmt.Errorf("unknown message type")
 	}
 	return nil
@@ -3234,16 +3236,17 @@ func (ws *WebSocketManager) processLimitChaseWorker(ctx context.Context, newLC *
 				newLC.mutex.Unlock()
 			case WSAddOrderResp:
 				if msg.Status != "ok" {
-					if strings.Contains(msg.ErrorMessage, "Invalid arguments:volume") {
+					switch {
+					case strings.Contains(msg.ErrorMessage, "Invalid arguments:volume"):
 						// remaining volume less than min order size; or invalid volume closing
 						ws.closeAndDeleteLimitChase(newLC.userRef)
 						return
-					} else if strings.Contains(msg.ErrorMessage, "Currency pair not supported") {
+					case strings.Contains(msg.ErrorMessage, "Currency pair not supported"):
 						// invalid tradeable pair passed to 'pair'; closing
 						ws.ErrorLogger.Println("error encountered during limit chase | invalid arg passed to 'pair':", newLC.pair)
 						ws.closeAndDeleteLimitChase(newLC.userRef)
 						return
-					} else if strings.Contains(msg.ErrorMessage, "Invalid price") {
+					case strings.Contains(msg.ErrorMessage, "Invalid price"):
 						// invalid price passed, this should never happen; closing
 						ws.ErrorLogger.Println("error encountered during limit chase | unexpected invalid price passed in limit chase", msg)
 						ws.closeAndDeleteLimitChase(newLC.userRef)
@@ -3362,7 +3365,7 @@ func (ws *WebSocketManager) startOpenOrderManager() {
 			}
 		} else {
 			ws.OpenOrdersMgr.mu.Lock()
-			ws.OpenOrdersMgr.seq = ws.OpenOrdersMgr.seq + 1
+			ws.OpenOrdersMgr.seq++
 			if ws.OpenOrdersMgr.seq == 1 {
 				// Build initial state of open orders
 				ws.OpenOrdersMgr.OpenOrders = make(map[string]WSOpenOrder, len(data.OpenOrders))
@@ -3375,15 +3378,16 @@ func (ws *WebSocketManager) startOpenOrderManager() {
 				// Update state of open orders
 				for _, order := range data.OpenOrders {
 					for orderID, orderInfo := range order {
-						if orderInfo.Status == "pending" {
+						switch {
+						case orderInfo.Status == "pending":
 							ws.OpenOrdersMgr.OpenOrders[orderID] = orderInfo
-						} else if orderInfo.Status == "open" {
+						case orderInfo.Status == "open":
 							order := ws.OpenOrdersMgr.OpenOrders[orderID]
 							order.Status = "open"
 							ws.OpenOrdersMgr.OpenOrders[orderID] = order
-						} else if orderInfo.Status == "closed" {
+						case orderInfo.Status == "closed":
 							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
-						} else if orderInfo.Status == "canceled" {
+						case orderInfo.Status == "canceled":
 							delete(ws.OpenOrdersMgr.OpenOrders, orderID)
 						}
 					}
@@ -3461,13 +3465,14 @@ func (kc *KrakenClient) connectPublic() error {
 func (kc *KrakenClient) connectPrivate() error {
 	err := kc.AuthenticateWebSockets()
 	if err != nil {
-		if errors.Is(err, errNoInternetConnection) {
+		switch {
+		case errors.Is(err, errNoInternetConnection):
 			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 			kc.reauthenticate()
-		} else if errors.Is(err, err403Forbidden) {
+		case errors.Is(err, err403Forbidden):
 			kc.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
 			kc.reauthenticate()
-		} else {
+		default:
 			kc.ErrorLogger.Printf("unknown error encountered while authenticating WebSockets | %s\n", err.Error())
 		}
 	}
@@ -3525,7 +3530,7 @@ func (c *WebSocketClient) reconnect(url string) error {
 				continue
 			}
 			if t < 8 {
-				t = t * 1.3
+				t *= 1.3
 			}
 			time.Sleep(time.Duration(t) * time.Second)
 		}
@@ -3626,7 +3631,7 @@ func (kc *KrakenClient) reauthenticate() {
 				continue
 			}
 			if t < 8 {
-				t = t * 1.3
+				t *= 1.3
 			}
 			time.Sleep(time.Duration(t) * time.Second)
 		}

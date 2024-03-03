@@ -521,20 +521,21 @@ func (kc *KrakenClient) ListTopVolumeLast24Hours(num ...uint16) ([]TickerVolume,
 				"USDT":  true,
 				"ZUSD":  true,
 			}
-			if usdEquivalents[(*allPairs)[ticker].Quote] {
+			switch {
+			case usdEquivalents[(*allPairs)[ticker].Quote]:
 				volume, vwap, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
 				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: vwap * volume})
 				// Handle cases where USD is base currency
-			} else if (*allPairs)[ticker].Base == "ZUSD" {
+			case (*allPairs)[ticker].Base == "ZUSD":
 				volume, _, err := parseVolumeVwap(ticker, ticker, tickers)
 				if err != nil {
 					return nil, err
 				}
 				topVolumeTickers = append(topVolumeTickers, TickerVolume{Ticker: ticker, Volume: volume})
-			} else {
+			default:
 				// Find matching pair with base and quote USD equivalent to normalize to USD volume
 				if _, ok := (*allPairs)[(*allPairs)[ticker].Base+"ZUSD"]; ok {
 					volume, vwap, err := parseVolumeVwap(ticker, (*allPairs)[ticker].Base+"ZUSD", tickers)
@@ -775,9 +776,6 @@ func (kc *KrakenClient) GetTrades(pair string, count ...uint16) (*TradesResp, er
 	err = processAPIResponse(res, &trades)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
-		return nil, err
-	}
-	if err != nil {
 		return nil, err
 	}
 	return &trades, nil
@@ -3914,11 +3912,12 @@ func (kc *KrakenClient) doRequest(urlPath string, values url.Values) (*http.Resp
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	httpResp, err := kc.Client.Do(req)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such host") && strings.Contains(err.Error(), "lookup") {
+		switch {
+		case strings.Contains(err.Error(), "no such host") && strings.Contains(err.Error(), "lookup"):
 			return nil, fmt.Errorf("%w | %w", errNoInternetConnection, err)
-		} else if strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "forbidden") {
+		case strings.Contains(err.Error(), "403") && strings.Contains(err.Error(), "forbidden"):
 			return nil, fmt.Errorf("%w | %w", err403Forbidden, err)
-		} else {
+		default:
 			return nil, fmt.Errorf("unknown http.Client.Do() error | %w", err)
 		}
 	}

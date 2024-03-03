@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -330,9 +329,6 @@ func (tr *TradesResp) UnmarshalJSON(data []byte) error {
 			for i, td := range tradeData {
 				tradeInfo, ok := td.([]interface{})
 				if !ok || len(tradeInfo) != 7 {
-					//DEBUG
-					log.Println(len(tradeInfo))
-					log.Println(tradeInfo)
 					err = fmt.Errorf("error asserting 'tradeData' to []interface{} or not enough data")
 					return err
 				}
@@ -1437,13 +1433,14 @@ func (bu *WSBookUpdateResp) UnmarshalJSON(data []byte) error {
 		if err := json.Unmarshal(raw[1], &aux); err != nil {
 			return fmt.Errorf("error unmarshalling to aux | %w", err)
 		}
-		if aux.Asks != nil {
+		switch {
+		case aux.Asks != nil:
 			bu.Asks = aux.Asks
 			bu.Checksum = aux.Checksum
-		} else if aux.Bids != nil {
+		case aux.Bids != nil:
 			bu.Bids = aux.Bids
 			bu.Checksum = aux.Checksum
-		} else if aux.Snapshot != nil {
+		case aux.Snapshot != nil:
 			return errNotABookUpdateMsg
 		}
 		// unmarshal remaining elements

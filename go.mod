@@ -7,4 +7,4 @@ require (
 	github.com/shopspring/decimal v1.3.1
 )
 
-require golang.org/x/net v0.17.0 // indirect
+require golang.org/x/net v0.21.0 // indirect

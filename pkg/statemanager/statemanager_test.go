@@ -1317,23 +1317,24 @@ func TestStateManager_ReceiveResponse(t *testing.T) {
 			if ok {
 				messageReceivedCounter++
 				respStr := resp.(string)
-				if messageReceivedCounter == 1 && respStr != "event occurred" {
+				switch {
+				case messageReceivedCounter == 1 && respStr != "event occurred":
 					t.Errorf("ReceiveResponse() did not receive correct message from first event message: %v", resp)
 					time.Sleep(time.Millisecond * 100)
-				} else if messageReceivedCounter == 2 && respStr != "mock error event" {
+				case messageReceivedCounter == 2 && respStr != "mock error event":
 					t.Errorf("ReceiveResponse() did not receive correct message from second event message: %v", resp)
 					time.Sleep(time.Millisecond * 100)
 					log.Println("sleeping before break")
-				} else if messageReceivedCounter == 2 {
-					break
+				case messageReceivedCounter == 2:
+					// Signal that we have received all responses
+					done <- true
+					return
 				}
 			} else {
 				// no response was available, sleep before checking again
 				time.Sleep(time.Millisecond * 100)
 			}
 		}
-		// Signal that we have received all responses
-		done <- true
 	}()
 
 	// Send test events
