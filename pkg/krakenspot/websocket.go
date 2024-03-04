@@ -2704,8 +2704,12 @@ func (ws *WebSocketManager) subscribePrivate(channelName, payload string, callba
 	return nil
 }
 
-// Starts a goroutine that continuously reads messages from the WebSocket
-// connection. If the message is not a heartbeat message, it routes the message.
+// startMessageReader starts a goroutine loop that reads messages from the
+// WebSocket connection and resets read deadline on every incoming message. If
+// read deadline is passed, unexpected WebSocket closure, or loss of internet
+// connection, it closes connection and starts reconnect process if enabled
+// (enabled by default). If the message is not a heartbeat message, it routes
+// the message.
 func (c *WebSocketClient) startMessageReader(url string) {
 	go func() {
 		for {
@@ -2766,6 +2770,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 					if err != nil {
 						c.ErrorLogger.Println("error routing message |", err)
 					}
+					c.Conn.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
 				} else {
 					// reset timeout delay on heartbeat message
 					c.Conn.SetReadDeadline(time.Now().Add(time.Second * timeoutDelay))
@@ -2775,8 +2780,9 @@ func (c *WebSocketClient) startMessageReader(url string) {
 	}()
 }
 
-// Does preliminary unmarshalling incoming message and determines which specific
-// route<messageType>Message method to call.
+// routeMessage performs preliminary unmarshalling incoming messages and
+// determines which specific route<MessageType>Message method to call and
+// routes the message.
 func (ws *WebSocketManager) routeMessage(msg []byte) error {
 	var err error
 	switch {
@@ -3515,9 +3521,6 @@ func (c *WebSocketClient) reconnect(url string) error {
 				c.reconnector.numDisconnected.Add(-1)
 				c.isReconnecting.Store(false)
 				if c.reconnector.numDisconnected.Load() == 0 {
-					c.reconnector.mutex.Lock()
-					c.reconnector.reconnectCond.Broadcast()
-					c.reconnector.mutex.Unlock()
 					c.ErrorLogger.Println("reconnect successful")
 				}
 				// Unblocks reconnect for rest of code
@@ -3556,13 +3559,22 @@ func (c *WebSocketClient) reconnect(url string) error {
 	if err != nil {
 		return fmt.Errorf("error calling resubscribe | %w", err)
 	}
+	c.reconnector.mutex.Lock()
+	c.reconnector.reconnectCond.Broadcast()
+	c.reconnector.mutex.Unlock()
 	return nil
 }
 
+// resubscribe is a helper method that loops over all active subscriptions and
+// calls their respective Subscribe<Channel> method. Currently has no way to
+// maintain functional options passed to original subscriptions. TODO
 func (ws *WebSocketManager) resubscribe(url string) error {
 	switch url {
 	case wsPrivateURL:
-		for channelName, sub := range ws.SubscriptionMgr.PrivateSubscriptions {
+		ws.SubscriptionMgr.mu.RLock()
+		subs := ws.SubscriptionMgr.PrivateSubscriptions
+		ws.SubscriptionMgr.mu.RUnlock()
+		for channelName, sub := range subs {
 			switch channelName {
 			case "ownTrades":
 				ws.SubscribeOwnTrades(sub.Callback, WithoutSnapshot())
@@ -3571,7 +3583,10 @@ func (ws *WebSocketManager) resubscribe(url string) error {
 			}
 		}
 	case wsPublicURL:
-		for channelName, pairMap := range ws.SubscriptionMgr.PublicSubscriptions {
+		ws.SubscriptionMgr.mu.RLock()
+		subs := ws.SubscriptionMgr.PublicSubscriptions
+		ws.SubscriptionMgr.mu.RUnlock()
+		for channelName, pairMap := range subs {
 			switch {
 			case channelName == "ticker":
 				for pair, sub := range pairMap {
@@ -3614,6 +3629,9 @@ func (ws *WebSocketManager) resubscribe(url string) error {
 	return nil
 }
 
+// reauthenticate is a helper method to get a new authenticated websocket token
+// by starting a go routine loop that calls Kraken's "GetWebSocketsToken"
+// endpoint with backoff to repeat every 8 seconds until successful.
 func (kc *KrakenClient) reauthenticate() {
 	go func() {
 		t := 1.0
@@ -3623,10 +3641,10 @@ func (kc *KrakenClient) reauthenticate() {
 			if err != nil {
 				kc.ErrorLogger.Printf("encountered error on reauthenticating, trying again | %s\n", err)
 			} else {
-				kc.ErrorLogger.Println("reconnect successful")
+				kc.ErrorLogger.Println("reauth successful")
 				return
 			}
-			// attempt reconnect instantly 5 times then backoff to every 8 seconds
+			// attempt reauth instantly 5 times then backoff to every 8 seconds
 			if count < 6 {
 				continue
 			}
