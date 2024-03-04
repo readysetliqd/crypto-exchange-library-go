@@ -85,10 +85,11 @@ type WebSocketManager struct {
 }
 
 type ReconnectManager struct {
-	numDisconnected atomic.Int32
-	mutex           sync.Mutex
-	disconnectCond  *sync.Cond
-	reconnectCond   *sync.Cond
+	numDisconnected  atomic.Int32
+	numResubscribing atomic.Int32 // number of clients, not channels
+	mutex            sync.Mutex
+	disconnectCond   *sync.Cond
+	reconnectCond    *sync.Cond
 }
 
 type WebSocketClient struct {

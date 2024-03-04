@@ -2484,11 +2484,12 @@ func (ws *WebSocketManager) subscribePublic(channelName, payload, pair string, c
 	// and Subscribe() methods are called for the same channel
 	// if channel/pair already exists, unlock mutex and sleep lets Unsubscribe()
 	// processes finish deleting pair from book before creating a new one
-	// FIXME code will likely be reached and slow down when resubscribing
 	if _, ok := ws.SubscriptionMgr.PublicSubscriptions[channelName][pair]; ok {
-		ws.SubscriptionMgr.mu.Unlock()
-		time.Sleep(time.Millisecond * 300)
-		ws.SubscriptionMgr.mu.Lock()
+		if ws.reconnectMgr.numResubscribing.Load() == 0 {
+			ws.SubscriptionMgr.mu.Unlock()
+			time.Sleep(time.Millisecond * 300)
+			ws.SubscriptionMgr.mu.Lock()
+		}
 	}
 	ws.SubscriptionMgr.PublicSubscriptions[channelName][pair] = sub
 	ws.SubscriptionMgr.mu.Unlock()
@@ -3566,9 +3567,14 @@ func (c *WebSocketClient) reconnect(url string) error {
 }
 
 // resubscribe is a helper method that loops over all active subscriptions and
-// calls their respective Subscribe<Channel> method. Currently has no way to
-// maintain functional options passed to original subscriptions. TODO
+// calls their respective Subscribe<Channel> method. TODO Currently has no way to
+// maintain functional options passed to original subscriptions.
+//
+// Note: Returns an error as a code safety check only if encountered an unknown
+// url or channel name; other checks throughout this package and Kraken's
+// server should prevent this ever ocurring.
 func (ws *WebSocketManager) resubscribe(url string) error {
+	ws.reconnectMgr.numResubscribing.Add(1)
 	switch url {
 	case wsPrivateURL:
 		ws.SubscriptionMgr.mu.RLock()
@@ -3626,6 +3632,7 @@ func (ws *WebSocketManager) resubscribe(url string) error {
 	default:
 		return fmt.Errorf("unknown url")
 	}
+	ws.reconnectMgr.numResubscribing.Add(-1)
 	return nil
 }
 
@@ -3656,6 +3663,9 @@ func (kc *KrakenClient) reauthenticate() {
 	}()
 }
 
+// dialKraken dials Kraken's WebSocket server at the specified url and creates
+// a new WebSocket client connection with read deadline of 'timeoutDelay'
+// seconds.
 func (c *WebSocketClient) dialKraken(url string) error {
 	c.Mutex.Lock()
 	defer c.Mutex.Unlock()
