@@ -121,6 +121,13 @@ type Authenticator interface {
 // resubscriber is a field in WebSocketClient to hold a pointer to WebSocketManger
 // for access to resubscribing to channels without creating circular depencies
 type resubscriber interface {
+	// resubscribe is a helper method that loops over all active subscriptions and
+	// calls their respective Subscribe<Channel> method. TODO Currently has no way to
+	// maintain functional options passed to original subscriptions.
+	//
+	// Note: Returns an error as a code safety check only if encountered an unknown
+	// url or channel name; other checks throughout this package and Kraken's
+	// server should prevent this ever ocurring.
 	resubscribe(url string) error
 }
 

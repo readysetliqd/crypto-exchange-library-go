@@ -3503,12 +3503,16 @@ func (kc *KrakenClient) connectPrivate() error {
 	return nil
 }
 
-// Attempts reconnect with dialKraken() method. Retries 5 times instantly then
-// scales back to attempt reconnect once every ~8 seconds.
-func (c *WebSocketClient) reconnect(url string) error {
-	var wg sync.WaitGroup
-	wg.Add(1)
+// reconnect loops attempting reconnect to Kraken's WebSocket server at passed
+// 'url' with the dialKraken() method. It reauthenticates WebSocket token if
+// url, starts a new message reader, calls resubscribe function, and broadcasts
+// a reconnectCond signal when done. This is a helper method called in
+// startMessageReader when connection to WebSocket times out. Retries 5 times
+// instantly then scales back to attempt reconnect once every ~8 seconds.
+func (c *WebSocketClient) reconnect(url string) {
 	go func() {
+		var wg sync.WaitGroup
+		wg.Add(1)
 		t := 1.0
 		count := 0
 		for {
@@ -3522,11 +3526,11 @@ func (c *WebSocketClient) reconnect(url string) error {
 				c.reconnector.numDisconnected.Add(-1)
 				c.isReconnecting.Store(false)
 				if c.reconnector.numDisconnected.Load() == 0 {
-					c.ErrorLogger.Println("reconnect successful")
+					c.ErrorLogger.Println("reconnect successful | url: ", url)
 				}
 				// Unblocks reconnect for rest of code
 				wg.Done()
-				return
+				break
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
 			if count < 6 {
@@ -3538,32 +3542,34 @@ func (c *WebSocketClient) reconnect(url string) error {
 			}
 			time.Sleep(time.Duration(t) * time.Second)
 		}
-	}()
-	// Waits for this clients reconnect successful
-	wg.Wait()
-	// Reauthenticate WebSocket token if client is Private
-	if url == wsPrivateURL {
-		err := c.Authenticator.AuthenticateWebSockets()
-		if err != nil {
-			if errors.Is(err, errNoInternetConnection) {
-				c.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
-				c.Authenticator.reauthenticate()
-			} else if errors.Is(err, err403Forbidden) {
-				c.ErrorLogger.Printf("encountered error; attempting reauth | %s\n", err.Error())
-				c.Authenticator.reauthenticate()
+		// Waits for this clients reconnect successful
+		wg.Wait()
+		// Reauthenticate WebSocket token if client is Private
+		if url == wsPrivateURL {
+			err := c.Authenticator.AuthenticateWebSockets()
+			if err != nil {
+				switch {
+				case errors.Is(err, errNoInternetConnection):
+					c.ErrorLogger.Printf("encountered no internet error; attempting reauth | %s\n", err.Error())
+					c.Authenticator.reauthenticate()
+				case errors.Is(err, err403Forbidden):
+					c.ErrorLogger.Printf("encountered 403 error; attempting reauth | %s\n", err.Error())
+					c.Authenticator.reauthenticate()
+				default:
+					c.ErrorLogger.Fatalf("unexpected error authenticating websockets; shutting down | %v", err)
+				}
 			}
-			return fmt.Errorf("error authenticating websockets | %w", err)
 		}
-	}
-	c.startMessageReader(url)
-	err := c.resubscriber.resubscribe(url)
-	if err != nil {
-		return fmt.Errorf("error calling resubscribe | %w", err)
-	}
-	c.reconnector.mutex.Lock()
-	c.reconnector.reconnectCond.Broadcast()
-	c.reconnector.mutex.Unlock()
-	return nil
+		c.startMessageReader(url)
+		c.ErrorLogger.Println("resubscribing channels | url: ", url)
+		err := c.resubscriber.resubscribe(url)
+		if err != nil {
+			c.ErrorLogger.Fatalf("unexpected error resubscribing websockets; shutting down | %v", err)
+		}
+		c.reconnector.mutex.Lock()
+		c.reconnector.reconnectCond.Broadcast()
+		c.reconnector.mutex.Unlock()
+	}()
 }
 
 // resubscribe is a helper method that loops over all active subscriptions and
