@@ -1672,6 +1672,9 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 	if _, ok := validDirection[direction]; !ok {
 		return fmt.Errorf("invalid arg '%s' passed to 'direction'; expected \"buy\" or \"sell\"", direction)
 	}
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
 
 	// Build payload
 	var buffer bytes.Buffer
@@ -1734,6 +1737,10 @@ func (ws *WebSocketManager) WSAddOrder(orderType WSOrderType, direction, volume,
 //
 //	kc.WSEditOrder("O26VH7-COEPR-YFYXLK", "XBT/USD", ks.WSNewPrice("21000"), krakenspot.WSNewPostOnly(), krakenspot.WSValidateEditOrder())
 func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditOrderOption) error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Build payload
 	var buffer bytes.Buffer
 	for _, option := range options {
@@ -1813,6 +1820,10 @@ func (ws *WebSocketManager) WSEditOrder(orderID, pair string, options ...WSEditO
 //
 //	err := kc.WSCancelOrder("O26VH7-COEPR-YFYXLK")
 func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Build payload
 	event := "cancelOrder"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "txid": ["%s"]}`, event, ws.WebSocketToken, orderID)
@@ -1876,6 +1887,10 @@ func (ws *WebSocketManager) WSCancelOrder(orderID string) error {
 //
 //	err := kc.WSCancelOrder([]string{"O26VH7-COEPR-YFYXLK", "OGTT3Y-C6I3P-X2I6HX"})
 func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Build payload
 	event := "cancelOrder"
 	ordersJSON, err := json.Marshal(orderIDs)
@@ -1942,6 +1957,10 @@ func (ws *WebSocketManager) WSCancelOrders(orderIDs []string) error {
 //
 //	err := kc.WSCancelAllOrders()
 func (ws *WebSocketManager) WSCancelAllOrders() error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Build payload
 	event := "cancelAll"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s"}`, event, ws.WebSocketToken)
@@ -1981,6 +2000,10 @@ func (ws *WebSocketManager) WSCancelAllOrders() error {
 //
 // kc.WSCancelAllOrdersAfter("60")
 func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Build payload
 	event := "cancelAllOrdersAfter"
 	payload := fmt.Sprintf(`{"event": "%s", "token": "%s", "timeout": %s}`, event, ws.WebSocketToken, timeout)
@@ -2074,6 +2097,10 @@ func (ws *WebSocketManager) WSCancelAllOrdersAfter(timeout string) error {
 //	<-limitChaseClosed
 //	return
 func (ws *WebSocketManager) WSLimitChase(direction, volume, pair string, userRef int32, fillCallback func(*LimitChaseFill), closeCallback func()) error {
+	if ws.AuthWebSocketClient == nil {
+		return fmt.Errorf("error AuthWebSocketClient nil; call Connect() or ConnectPrivate() and try again")
+	}
+
 	// Validate inputs and convert 'volume' to decimal 'direction' to int
 	dir, ok := validDirection[direction]
 	if !ok {
@@ -2720,7 +2747,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 			default:
 				_, msg, err := c.Conn.ReadMessage()
 				if err != nil {
-					if err, ok := err.(net.Error); ok && err.Timeout() {
+					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 						c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
 						c.Cancel()
 						c.Conn.Close()
