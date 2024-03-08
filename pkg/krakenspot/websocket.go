@@ -2743,12 +2743,14 @@ func (c *WebSocketClient) startMessageReader(url string) {
 		for {
 			select {
 			case <-c.Ctx.Done():
+				c.ErrorLogger.Println("message reader stopped | url: ", url)
 				return
 			default:
 				_, msg, err := c.Conn.ReadMessage()
 				if err != nil {
 					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 						c.ErrorLogger.Println("websocket connection timed out, attempting reconnect to url |", url)
+						// signals to subscription channel goroutines to shut down
 						c.Cancel()
 						c.Conn.Close()
 						if c.attemptReconnect {
@@ -2763,6 +2765,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 						return
 					} else if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseProtocolError, websocket.CloseUnsupportedData, websocket.CloseNoStatusReceived) {
 						c.ErrorLogger.Println("unexpected websocket closure, attempting reconnect to url |", url)
+						// signals to subscription channel goroutines to shut down
 						c.Cancel()
 						c.Conn.Close()
 						if c.attemptReconnect {
@@ -2777,6 +2780,7 @@ func (c *WebSocketClient) startMessageReader(url string) {
 						return
 					} else if strings.Contains(err.Error(), "wsarecv") {
 						c.ErrorLogger.Println("internet connection lost, attempting reconnect to url |", url)
+						// signals to subscription channel goroutines to shut down
 						c.Cancel()
 						c.Conn.Close()
 						if c.attemptReconnect {
@@ -3538,8 +3542,28 @@ func (kc *KrakenClient) connectPrivate() error {
 // instantly then scales back to attempt reconnect once every ~8 seconds.
 func (c *WebSocketClient) reconnect(url string) {
 	go func() {
-		var wg sync.WaitGroup
-		wg.Add(1)
+		// Reauthenticate WebSocket token if client is Private
+		if url == wsPrivateURL {
+			err := c.Authenticator.AuthenticateWebSockets()
+			if err != nil {
+				switch {
+				case errors.Is(err, errNoInternetConnection):
+					c.ErrorLogger.Printf("encountered no internet error; attempting reauth | %s\n", err.Error())
+					// starts a loop that only releases on reauthentication success
+					c.Authenticator.reauthenticate()
+				case errors.Is(err, err403Forbidden):
+					c.ErrorLogger.Printf("encountered 403 error; attempting reauth | %s\n", err.Error())
+					// starts a loop that only releases on reauthentication success
+					c.Authenticator.reauthenticate()
+				default:
+					// TODO handle more explicit error types, this is probably going to get hit more than it should
+					c.ErrorLogger.Printf("unexpected error authenticating websockets; shutting down | %v", err)
+					// starts a loop that only releases on reauthentication success
+					c.Authenticator.reauthenticate()
+				}
+			}
+		}
+		// Begin reconnect loop
 		t := 1.0
 		count := 0
 		for {
@@ -3556,7 +3580,6 @@ func (c *WebSocketClient) reconnect(url string) {
 					c.ErrorLogger.Println("reconnect successful | url: ", url)
 				}
 				// Unblocks reconnect for rest of code
-				wg.Done()
 				break
 			}
 			// attempt reconnect instantly 5 times then backoff to every 8 seconds
@@ -3569,24 +3592,11 @@ func (c *WebSocketClient) reconnect(url string) {
 			}
 			time.Sleep(time.Duration(t) * time.Second)
 		}
-		// Waits for this clients reconnect successful
-		wg.Wait()
-		// Reauthenticate WebSocket token if client is Private
-		if url == wsPrivateURL {
-			err := c.Authenticator.AuthenticateWebSockets()
-			if err != nil {
-				switch {
-				case errors.Is(err, errNoInternetConnection):
-					c.ErrorLogger.Printf("encountered no internet error; attempting reauth | %s\n", err.Error())
-					c.Authenticator.reauthenticate()
-				case errors.Is(err, err403Forbidden):
-					c.ErrorLogger.Printf("encountered 403 error; attempting reauth | %s\n", err.Error())
-					c.Authenticator.reauthenticate()
-				default:
-					c.ErrorLogger.Fatalf("unexpected error authenticating websockets; shutting down | %v", err)
-				}
-			}
-		}
+		// reinitialize context that got cancelled during startmessagereader shutdown
+		c.Mutex.Lock()
+		c.Ctx, c.Cancel = context.WithCancel(context.Background())
+		c.Mutex.Unlock()
+		c.ErrorLogger.Println("restarting message reader | url: ", url)
 		c.startMessageReader(url)
 		c.ErrorLogger.Println("resubscribing channels | url: ", url)
 		err := c.resubscriber.resubscribe(url)
@@ -3670,30 +3680,28 @@ func (ws *WebSocketManager) resubscribe(url string) error {
 }
 
 // reauthenticate is a helper method to get a new authenticated websocket token
-// by starting a go routine loop that calls Kraken's "GetWebSocketsToken"
-// endpoint with backoff to repeat every 8 seconds until successful.
+// by starting a loop that calls Kraken's "GetWebSocketsToken" endpoint with
+// backoff to repeat every 8 seconds until successful.
 func (kc *KrakenClient) reauthenticate() {
-	go func() {
-		t := 1.0
-		count := 0
-		for {
-			err := kc.AuthenticateWebSockets()
-			if err != nil {
-				kc.ErrorLogger.Printf("encountered error on reauthenticating, trying again | %s\n", err)
-			} else {
-				kc.ErrorLogger.Println("reauth successful")
-				return
-			}
-			// attempt reauth instantly 5 times then backoff to every 8 seconds
-			if count < 6 {
-				continue
-			}
-			if t < 8 {
-				t *= 1.3
-			}
-			time.Sleep(time.Duration(t) * time.Second)
+	t := 1.0
+	count := 0
+	for {
+		err := kc.AuthenticateWebSockets()
+		if err != nil {
+			kc.ErrorLogger.Printf("encountered error on reauthenticating, trying again | %s\n", err)
+		} else {
+			kc.ErrorLogger.Println("reauth successful")
+			return
 		}
-	}()
+		// attempt reauth instantly 5 times then backoff to every ~8 seconds
+		if count < 6 {
+			continue
+		}
+		if t < 8 {
+			t *= 1.3
+		}
+		time.Sleep(time.Duration(t) * time.Second)
+	}
 }
 
 // dialKraken dials Kraken's WebSocket server at the specified url and creates
