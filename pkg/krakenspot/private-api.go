@@ -48,14 +48,14 @@ func (kc *KrakenClient) GetServerTime() (*ServerTime, error) {
 	defer res.Body.Close()
 
 	// Process API response
-	var systemStatus ServerTime
-	err = processAPIResponse(res, &systemStatus)
+	var serverTime ServerTime
+	err = processAPIResponse(res, &serverTime)
 	if err != nil {
 		err = fmt.Errorf("error calling processAPIResponse() | %w", err)
 		return nil, err
 	}
 
-	return &systemStatus, nil
+	return &serverTime, nil
 }
 
 // Calls Kraken API public market data "SystemStatus" endpoint. Gets the current
@@ -3787,7 +3787,7 @@ func (kc *KrakenClient) GetEarnAllocations(options ...GetEarnAllocationsOption) 
 // Calls Kraken API private Account Data "GetWebSocketsToken" endpoint. This
 // method only returns the API's response as a struct including the token and
 // the number of seconds until expiration. It does not add the token to *KrakenClient.
-// Use *KrakenClient method AuthenticateWebsocket() instead.
+// Use *KrakenClient method AuthenticateWebSockets() instead.
 //
 // Note: An authentication token must be requested via this REST API endpoint
 // in order to connect to and authenticate with our Websockets API. The token
@@ -3950,15 +3950,15 @@ func (kc *KrakenClient) startAPIRateLimiter() {
 	defer ticker.Stop()
 	for range ticker.C {
 		kc.APIManager.Mutex.Lock()
+		defer kc.APIManager.Mutex.Unlock()
+
 		if kc.APIManager.APICounter > 0 {
 			kc.APIManager.APICounter -= 1
 			if kc.APIManager.APICounter == 0 {
 				ticker.Stop()
-				kc.APIManager.Mutex.Unlock()
 				return
 			}
 		}
-		kc.APIManager.Mutex.Unlock()
 		kc.APIManager.CounterDecayCond.Broadcast()
 	}
 }
