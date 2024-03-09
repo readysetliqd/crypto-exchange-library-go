@@ -115,6 +115,7 @@ type MessageRouter interface {
 // for access to authenticating token methods without creating circular depencies
 type Authenticator interface {
 	AuthenticateWebSockets() error
+	GetSystemStatus() (*SystemStatus, error)
 	reauthenticate()
 }
 

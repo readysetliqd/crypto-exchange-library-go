@@ -34,7 +34,10 @@ const (
 
 var heartbeat = []byte{123, 34, 101, 118, 101, 110, 116, 34, 58, 34, 104, 101, 97, 114, 116, 98, 101, 97, 116, 34, 125}
 
-const timeoutDelay = 10
+const (
+	dialTimeoutDelay = 2  // timeout for dialKraken calls
+	wsTimeoutDelay   = 10 // timeout for message reader to disconnect ws connection
+)
 
 var publicChannelNames = map[string]bool{
 	"ticker":     true,
