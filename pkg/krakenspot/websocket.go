@@ -3587,12 +3587,12 @@ func (c *WebSocketClient) reconnect(url string) {
 				// Unblocks reconnect for rest of code
 				break
 			}
-			// attempt reconnect instantly 5 times then backoff to every 8 seconds
-			if count < 6 {
+			// attempt reconnect instantly 3 times then backoff to every 15 seconds
+			if count < 4 {
 				count++
 				continue
 			}
-			if t < 8 {
+			if t < 15 {
 				t *= 1.3
 			}
 			time.Sleep(time.Duration(t) * time.Second)
@@ -3699,11 +3699,11 @@ func (kc *KrakenClient) reauthenticate() {
 			kc.ErrorLogger.Println("reauth successful")
 			return
 		}
-		// attempt reauth instantly 5 times then backoff to every ~8 seconds
-		if count < 6 {
+		// attempt reauth instantly 3 times then backoff to every ~15 seconds
+		if count < 4 {
 			continue
 		}
-		if t < 8 {
+		if t < 15 {
 			t *= 1.3
 		}
 		time.Sleep(time.Duration(t) * time.Second)
